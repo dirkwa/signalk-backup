@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { SCHEMA_DEFAULTS, Config } from '../src/config/schema'
+import { SCHEMA_DEFAULTS, Config } from '../src/config/schema.js'
 
 /**
  * Regression tests for the schema-defaults merge in start().

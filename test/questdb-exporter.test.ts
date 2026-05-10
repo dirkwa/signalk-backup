@@ -1,12 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, mkdir, rm, readdir, stat } from 'fs/promises'
-import { tmpdir } from 'os'
-import { join } from 'path'
-import { Readable } from 'stream'
-import { QuestDBExporter } from '../src/database-export/questdb'
+import { mkdtemp, mkdir, rm, readdir, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Readable } from 'node:stream'
+import { QuestDBExporter } from '../src/database-export/questdb.js'
+
+// Derive fetch's input type from the global. The DOM lib's `RequestInfo`
+// is a string|Request alias, but we don't pull DOM into tsconfig (server-
+// side plugin), so we use `Parameters<typeof fetch>[0]` to stay portable.
+type FetchInput = Parameters<typeof fetch>[0]
 
 /** Narrow fetch's input arg to its URL string for routing. */
-function urlOf(input: RequestInfo | URL): string {
+function urlOf(input: FetchInput): string {
   if (typeof input === 'string') return input
   if (input instanceof URL) return input.toString()
   // Request — has a `.url` getter.
@@ -21,7 +26,7 @@ function urlOf(input: RequestInfo | URL): string {
  * we only verify byte plumbing here, not Parquet validity).
  */
 function makeMockFetch(tables: string[], parquetBytes = 64): typeof fetch {
-  const handler = (input: RequestInfo | URL): Response => {
+  const handler = (input: FetchInput): Response => {
     const url = urlOf(input)
     if (url.endsWith('/full-export/tables')) {
       return new Response(JSON.stringify({ tables }), {
@@ -44,7 +49,7 @@ function makeMockFetch(tables: string[], parquetBytes = 64): typeof fetch {
     }
     return new Response('not found', { status: 404 })
   }
-  return (input: RequestInfo | URL) => Promise.resolve(handler(input))
+  return (input: FetchInput) => Promise.resolve(handler(input))
 }
 
 describe('QuestDBExporter', () => {
@@ -116,7 +121,7 @@ describe('QuestDBExporter', () => {
 
   it('exportAll() continues past per-table HTTP failures', async () => {
     const baseFetch = makeMockFetch(['good_table', 'bad_table'])
-    const fetchImpl: typeof fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl: typeof fetch = (input: FetchInput, init?: RequestInit) => {
       const url = urlOf(input)
       if (url.endsWith('/full-export/bad_table')) {
         return Promise.resolve(new Response('boom', { status: 502 }))
@@ -137,7 +142,7 @@ describe('QuestDBExporter', () => {
   })
 
   it('refuses table names from the tables route that fail safe-identifier check', async () => {
-    const fetchImpl: typeof fetch = (input: RequestInfo | URL) => {
+    const fetchImpl: typeof fetch = (input: FetchInput) => {
       const url = urlOf(input)
       if (url.endsWith('/full-export/tables')) {
         return Promise.resolve(

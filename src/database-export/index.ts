@@ -9,10 +9,10 @@
  * scope (see design doc).
  */
 
-import { mkdir } from 'fs/promises'
-import { join } from 'path'
-import { QuestDBExporter } from './questdb'
-import type { DatabaseExporter, ExportResult } from './types'
+import { mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { QuestDBExporter } from './questdb.js'
+import type { DatabaseExporter, ExportResult } from './types.js'
 
 const PLUGIN_ID = 'signalk-backup'
 const STAGING_SUBDIR = 'database-exports'
@@ -70,5 +70,5 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
   return results
 }
 
-export type { DatabaseExporter, ExportResult, TableExport } from './types'
-export { QuestDBExporter } from './questdb'
+export type { DatabaseExporter, ExportResult, TableExport } from './types.js'
+export { QuestDBExporter } from './questdb.js'

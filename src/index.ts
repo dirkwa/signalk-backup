@@ -1,16 +1,15 @@
-import path from 'path'
+import path from 'node:path'
 import { Plugin } from '@signalk/server-api'
 import { Request, Response, IRouter } from 'express'
-import { BackupClient } from './backup-client'
-import { registerConsoleProxy } from './console-proxy'
+import { BackupClient } from './backup-client.js'
 import {
   BackupServerAPI,
   ContainerConfig,
   ContainerManagerApi,
   ContainerResourceLimits
-} from './types'
-import { ConfigSchema, Config, SCHEMA_DEFAULTS } from './config/schema'
-import { runAllExports } from './database-export'
+} from './types.js'
+import { ConfigSchema, Config, SCHEMA_DEFAULTS } from './config/schema.js'
+import { runAllExports } from './database-export/index.js'
 
 const BACKUP_IMAGE = 'ghcr.io/dirkwa/signalk-backup-server'
 const CONTAINER_NAME = 'signalk-backup-server'
@@ -105,7 +104,7 @@ async function resolveActualAddress(containers: ContainerManagerApi): Promise<st
   return containers.resolveContainerAddress(CONTAINER_NAME, API_PORT)
 }
 
-module.exports = function (app: BackupServerAPI): Plugin {
+export default function (app: BackupServerAPI): Plugin {
   let client: BackupClient | null = null
   let currentSettings: Config | null = null
   let containerAddress: string | null = null
@@ -179,12 +178,9 @@ module.exports = function (app: BackupServerAPI): Plugin {
     },
 
     registerWithRouter(router: IRouter) {
-      // Reverse-proxy the container UI through SignalK's origin so the
-      // browser doesn't need direct access to the container's loopback-
-      // bound port. Inherits SignalK auth.
-      registerConsoleProxy(router, () => containerAddress)
-
-      // Status endpoint — used by the config panel for the running/idle pill
+      // Status endpoint — surfaced by the SignalK admin panel for the
+      // running/idle pill, and used by the webapp shell (PR3) for its
+      // ready-state badge.
       router.get('/status', async (_req: Request, res: Response) => {
         const containers = getContainerManager()
         let containerState: string = 'unknown'
@@ -216,23 +212,8 @@ module.exports = function (app: BackupServerAPI): Plugin {
             image: containerImage,
             managed: currentSettings?.managedContainer !== false
           },
-          ready: client !== null,
-          guiUrl: containerAddress ? `http://${containerAddress}/` : null
+          ready: client !== null
         })
-      })
-
-      // Redirect HTML target — public/index.html does fetch('/api/gui-url')
-      // and replaces window.location with the returned URL. We return the
-      // plugin's own /console proxy path (relative URL), so the browser
-      // reaches the backup UI via the SignalK origin and inherits auth.
-      // Direct container access (loopback-bound) wouldn't work from a
-      // remote browser anyway.
-      router.get('/api/gui-url', (_req: Request, res: Response) => {
-        if (!client || !containerAddress) {
-          res.status(503).json({ error: 'backup-server not ready' })
-          return
-        }
-        res.json({ url: `/plugins/${PLUGIN_ID}/console/` })
       })
 
       // Update detection — delegated to signalk-container's centralized
