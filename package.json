@@ -68,7 +68,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.14",
     "babel-loader": "^10.1.1",
-    "eslint": "^9.26.0",
+    "eslint": "^10.3.0",
     "eslint-config-prettier": "^10.0.0",
     "eslint-plugin-prettier": "^5.0.0",
     "prettier": "^3.0.0",
