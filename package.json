@@ -1,0 +1,88 @@
+{
+  "name": "signalk-backup",
+  "version": "0.1.0",
+  "description": "Scheduled deduplicated backups of SignalK config to local storage and Google Drive (via Kopia + rclone)",
+  "main": "plugin/index.js",
+  "signalk-plugin-enabled-by-default": true,
+  "scripts": {
+    "format": "prettier --write 'src/**/*.{ts,tsx}' 'test/**/*.ts' && eslint --fix 'src/**/*.{ts,tsx}' 'test/**/*.ts'",
+    "lint": "eslint 'src/**/*.{ts,tsx}' 'test/**/*.ts'",
+    "typecheck:panel": "tsc -p tsconfig.configpanel.json",
+    "build": "tsc && npm run typecheck:panel && node build.js && webpack",
+    "build:config": "webpack",
+    "build:all": "npm run lint && npm run build && npm run test",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "signalk-node-server-plugin",
+    "signalk-webapp",
+    "signalk-category-utility",
+    "signalk-plugin-configurator",
+    "backup",
+    "kopia",
+    "rclone",
+    "google-drive"
+  ],
+  "signalk": {
+    "displayName": "Backup",
+    "appIcon": "assets/icon.png",
+    "webapp": {
+      "name": "SignalK Backup",
+      "description": "Scheduled deduplicated backups to local storage and Google Drive",
+      "location": "/plugins/signalk-backup/"
+    },
+    "requires": [
+      "signalk-container"
+    ]
+  },
+  "files": [
+    "plugin/**/*",
+    "public/**/*",
+    "assets/**/*",
+    "docs/**/*"
+  ],
+  "engines": {
+    "node": ">=22.5.0",
+    "signalk": ">=2.24.0"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.0"
+  },
+  "peerDependencies": {
+    "signalk-container": ">=0.1.6"
+  },
+  "peerDependenciesMeta": {
+    "signalk-container": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.5",
+    "@babel/preset-react": "^7.28.5",
+    "@babel/preset-typescript": "^7.28.5",
+    "@eslint/js": "^9.0.0",
+    "@signalk/server-api": "^2.24.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.14",
+    "babel-loader": "^10.1.1",
+    "eslint": "^9.26.0",
+    "eslint-config-prettier": "^10.0.0",
+    "eslint-plugin-prettier": "^5.0.0",
+    "prettier": "^3.0.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.5",
+    "webpack": "^5.105.4",
+    "webpack-cli": "^7.0.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dirkwa/signalk-backup.git"
+  },
+  "license": "Apache-2.0"
+}
