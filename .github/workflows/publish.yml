@@ -1,9 +1,15 @@
 name: Publish Package
 
+# Tag glob is intentionally tight ('v[0-9]*.[0-9]*.[0-9]*') so stray
+# tags like `vendor-fix` or `vnext` don't trigger a publish. Prerelease
+# suffixes (-beta./-rc.) still match because the glob looks at the
+# leading digits only; the publish step routes them to npm's `beta`
+# dist-tag instead of `latest`.
+
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]*.[0-9]*.[0-9]*'
 
 jobs:
   release:
