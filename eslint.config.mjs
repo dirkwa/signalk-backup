@@ -8,8 +8,11 @@ export default tseslint.config(
   eslintPluginPrettier,
   {
     languageOptions: {
+      // List both projects so files in src/, test/, AND webapp/ resolve
+      // to the right tsconfig (different lib/jsx/module settings between
+      // the Node plugin and the browser webapp).
       parserOptions: {
-        project: './tsconfig.eslint.json',
+        project: ['./tsconfig.eslint.json', './tsconfig.webapp.json'],
         tsconfigRootDir: import.meta.dirname
       }
     },
@@ -28,6 +31,6 @@ export default tseslint.config(
     }
   },
   {
-    ignores: ['plugin/**', 'node_modules/**']
+    ignores: ['plugin/**', 'public/**', 'node_modules/**']
   }
 )

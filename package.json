@@ -6,15 +6,20 @@
   "type": "module",
   "signalk-plugin-enabled-by-default": true,
   "scripts": {
-    "format": "prettier --write 'src/**/*.ts' 'test/**/*.ts' && eslint --fix 'src/**/*.ts' 'test/**/*.ts'",
-    "lint": "eslint 'src/**/*.ts' 'test/**/*.ts'",
-    "build": "tsc",
+    "format": "prettier --write 'src/**/*.ts' 'test/**/*.ts' 'webapp/**/*.{ts,tsx,html}' && eslint --fix 'src/**/*.ts' 'test/**/*.ts' 'webapp/**/*.{ts,tsx}'",
+    "lint": "eslint 'src/**/*.ts' 'test/**/*.ts' 'webapp/**/*.{ts,tsx}'",
+    "typecheck:webapp": "tsc -p tsconfig.webapp.json",
+    "build:plugin": "tsc",
+    "build:webapp": "vite build",
+    "build": "npm run build:plugin && npm run typecheck:webapp && npm run build:webapp",
     "build:all": "npm run lint && npm run build && npm run test",
+    "dev": "vite",
     "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
     "signalk-node-server-plugin",
+    "signalk-webapp",
     "signalk-category-utility",
     "backup",
     "kopia",
@@ -24,12 +29,17 @@
   "signalk": {
     "displayName": "Backup",
     "appIcon": "assets/icon.png",
+    "webapp": {
+      "name": "Backup",
+      "description": "Scheduled deduplicated backups to local storage and Google Drive"
+    },
     "requires": [
       "signalk-container"
     ]
   },
   "files": [
     "plugin/**/*",
+    "public/**/*",
     "assets/**/*",
     "docs/**/*"
   ],
@@ -50,18 +60,27 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@signalk/server-admin-ui-dependencies": "^2.23.0",
     "@signalk/server-api": "^2.24.0",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/supertest": "^7.2.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "bootstrap": "^5.3.8",
     "eslint": "^10.3.0",
     "eslint-config-prettier": "^10.0.0",
     "eslint-plugin-prettier": "^5.0.0",
     "express": "^5.2.1",
     "prettier": "^3.0.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "reactstrap": "^9.2.3",
     "supertest": "^7.2.2",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.0.0",
+    "vite": "^8.0.11",
     "vitest": "^4.1.5"
   },
   "repository": {

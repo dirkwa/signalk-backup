@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <title>SignalK Backup</title>
+
+    <!--
+      Inherit the SignalK Admin UI's stylesheet so the page is themed
+      consistently with the admin. The admin is built with Vite and emits
+      content-hashed CSS filenames, so we read its manifest at load time
+      and inject the discovered <link> tags into our <head>. By awaiting
+      every link's load event before kicking off the React entry, we
+      guarantee the first paint is themed (no flash of unstyled content).
+
+      Falls back gracefully: if the manifest fetch fails (older SignalK
+      without the endpoint, admin not built), we still bootstrap the app
+      — it just renders unstyled until reactstrap/bootstrap defaults kick
+      in via component classnames.
+    -->
+    <script type="module">
+      async function injectAdminCss() {
+        const res = await fetch('/admin/.vite/manifest.json')
+        if (!res.ok) return
+        const manifest = await res.json()
+        const cssFiles = new Set()
+        // Two shapes are common: an entry whose `css` array lists its
+        // stylesheet imports, OR a top-level entry whose `file` itself
+        // ends in `.css` (when Vite extracts a global stylesheet). The
+        // current SignalK admin uses the second shape; older builds and
+        // the docs example use the first. Cover both.
+        for (const entry of Object.values(manifest)) {
+          if (!entry) continue
+          for (const css of entry.css ?? []) cssFiles.add(css)
+          if (typeof entry.file === 'string' && entry.file.endsWith('.css')) {
+            cssFiles.add(entry.file)
+          }
+        }
+        await Promise.all(
+          [...cssFiles].map(
+            (css) =>
+              new Promise((resolve) => {
+                const link = document.createElement('link')
+                link.rel = 'stylesheet'
+                link.href = '/admin/' + css
+                link.onload = resolve
+                link.onerror = resolve
+                document.head.appendChild(link)
+              })
+          )
+        )
+      }
+
+      try {
+        await injectAdminCss()
+      } catch (err) {
+        console.warn('signalk-backup: admin CSS not available', err)
+      } finally {
+        await import('./src/main.tsx')
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

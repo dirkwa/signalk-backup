@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!--
+    signalk-backup icon
+    A shield (backup, protection) over a SignalK-blue wave field with a
+    checkmark at center (snapshot completed). Two-tone, scales cleanly to
+    16px favicon size — kept simple geometry, no fine detail.
+  -->
+  <defs>
+    <linearGradient id="seaGrad" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#1a73c4"/>
+      <stop offset="100%" stop-color="#0d4d8a"/>
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#fafbfc"/>
+      <stop offset="100%" stop-color="#e6ebf0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- background disc -->
+  <circle cx="128" cy="128" r="120" fill="url(#seaGrad)"/>
+
+  <!-- waves -->
+  <path d="M 28 168 Q 64 152, 100 168 T 172 168 T 228 168 V 200 H 28 Z"
+        fill="#ffffff" fill-opacity="0.18"/>
+  <path d="M 28 188 Q 64 174, 100 188 T 172 188 T 228 188 V 220 H 28 Z"
+        fill="#ffffff" fill-opacity="0.12"/>
+
+  <!-- shield body -->
+  <path d="M 128 40
+           L 196 64
+           L 196 124
+           Q 196 168, 128 200
+           Q 60 168, 60 124
+           L 60 64 Z"
+        fill="url(#shieldGrad)"
+        stroke="#0d4d8a" stroke-width="6" stroke-linejoin="round"/>
+
+  <!-- checkmark -->
+  <path d="M 90 128 L 118 156 L 170 96"
+        fill="none"
+        stroke="#10b981"
+        stroke-width="16"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+</svg>
