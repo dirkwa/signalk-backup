@@ -178,9 +178,7 @@ export default function (app: BackupServerAPI): Plugin {
     },
 
     registerWithRouter(router: IRouter) {
-      // Status endpoint — surfaced by the SignalK admin panel for the
-      // running/idle pill, and used by the webapp shell (PR3) for its
-      // ready-state badge.
+      // Lightweight readiness signal for admin/webapp badges.
       router.get('/status', async (_req: Request, res: Response) => {
         const containers = getContainerManager()
         let containerState: string = 'unknown'
@@ -369,10 +367,14 @@ export default function (app: BackupServerAPI): Plugin {
         throw new Error('Could not resolve container address')
       }
       containerAddress = addr
-      client = new BackupClient(`http://${addr}`)
 
+      // `client` stays null until /api/health succeeds, so /status's
+      // `ready: client !== null` reports the truthful upstream-reachable
+      // signal rather than just "we know the address."
+      const pending = new BackupClient(`http://${addr}`)
       app.setPluginStatus('Waiting for backup-server to become ready...')
-      await client.waitForReady(60_000)
+      await pending.waitForReady(60_000)
+      client = pending
 
       await seedFirstRunSchedule(client)
       startDbExportTimer()
