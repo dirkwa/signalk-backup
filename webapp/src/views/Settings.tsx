@@ -148,8 +148,19 @@ function ExclusionsCard() {
   const isExcluded = (name: string, defaultExcluded: boolean): boolean =>
     overrides[name] ?? defaultExcluded
 
-  const toggle = (name: string, currentValue: boolean): void => {
-    setOverrides((prev) => ({ ...prev, [name]: !currentValue }))
+  // Toggle the dir's effective excluded state. If the new value matches
+  // the server default, drop the override key entirely — otherwise Save
+  // would stay enabled with no real diff to send.
+  const toggle = (name: string, currentEffective: boolean, serverDefault: boolean): void => {
+    const next = !currentEffective
+    setOverrides((prev) => {
+      if (next === serverDefault) {
+        if (!(name in prev)) return prev
+        return Object.fromEntries(Object.entries(prev).filter(([k]) => k !== name))
+      }
+      if (prev[name] === next) return prev
+      return { ...prev, [name]: next }
+    })
   }
 
   const onSave = async (): Promise<void> => {
@@ -230,7 +241,7 @@ function ExclusionsCard() {
                           checked={!excluded}
                           disabled={d.locked}
                           onChange={() => {
-                            toggle(d.name, excluded)
+                            toggle(d.name, excluded, d.excluded)
                           }}
                           aria-label={`Include ${d.name}`}
                         />
@@ -290,6 +301,24 @@ function PasswordCard() {
   const [success, setSuccess] = useState<string | null>(null)
   const [resetting, setResetting] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
+  // Default masked — user opts in by clicking Show. Shoulder-surfing
+  // protection only matters for custom passwords; the default kopia
+  // password is publicly known anyway.
+  const [revealed, setRevealed] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const onCopy = async (text: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => {
+        setCopied(false)
+      }, 1500)
+    } catch {
+      // Clipboard API can be blocked (non-HTTPS, permissions); fall
+      // back silently — the user can still see + select-to-copy.
+    }
+  }
 
   const onSave = async (): Promise<void> => {
     setError(null)
@@ -360,6 +389,47 @@ function PasswordCard() {
                 {hasCustom ? 'Custom password set' : 'Default password (publicly known)'}
               </Badge>
             </div>
+
+            {!editing && status.data?.password
+              ? (() => {
+                  const pw = status.data.password
+                  return (
+                    <FormGroup>
+                      <Label for="current-password">Current password</Label>
+                      <div className="d-flex gap-2 align-items-center">
+                        <Input
+                          id="current-password"
+                          type={revealed ? 'text' : 'password'}
+                          value={pw}
+                          readOnly
+                          style={{ fontFamily: 'monospace', maxWidth: '24rem' }}
+                        />
+                        <Button
+                          size="sm"
+                          color="secondary"
+                          outline
+                          onClick={() => {
+                            setRevealed((v) => !v)
+                          }}
+                          aria-label={revealed ? 'Hide password' : 'Show password'}
+                        >
+                          {revealed ? 'Hide' : 'Show'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          color="secondary"
+                          outline
+                          onClick={() => {
+                            void onCopy(pw)
+                          }}
+                        >
+                          {copied ? 'Copied!' : 'Copy'}
+                        </Button>
+                      </div>
+                    </FormGroup>
+                  )
+                })()
+              : null}
 
             {editing ? (
               <Form

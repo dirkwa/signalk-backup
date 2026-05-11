@@ -124,8 +124,9 @@ export interface PluginDataDirEntry {
 
 export interface PasswordStatus {
   hasCustomPassword: boolean
-  /** Server returns the current password value here, even when default. UI
-   *  never displays it — only the boolean above drives the UX. */
+  /** The current kopia password. Exposed to the user so it can be copied
+   *  down before a rotation — losing the custom password makes existing
+   *  backups unreadable. UI defaults to masked; users opt in to reveal. */
   password?: string
 }
 
@@ -261,7 +262,10 @@ export const api = {
 
   // Encryption password — kopia's repo password. Default is a known
   // string; once a user sets a custom one, hasCustomPassword goes true.
-  // We never display the actual value in the UI.
+  // Server returns both the boolean and the actual password; the UI
+  // shows it behind a reveal toggle so the user can copy it before a
+  // rotation (losing the custom password makes existing backups
+  // unreadable).
   passwordStatus: () => request<PasswordStatus>('/backups/password'),
   setPassword: (password: string) =>
     request<{ updated: boolean }>('/backups/password', {
