@@ -80,7 +80,16 @@ export interface RestoreStatus {
 export type CloudSyncMode = 'manual' | 'after_backup' | 'scheduled'
 export type CloudSyncFrequency = 'daily' | 'weekly'
 
+/**
+ * Cloud sync provider identifier. Currently only `gdrive` is implemented
+ * end-to-end. Future variants (`smb`, `local`, …) will extend this union
+ * — the field is on every status payload so the UI can branch on it now.
+ */
+export type CloudSyncProvider = 'gdrive'
+
 export interface CloudStatus {
+  /** Active cloud provider. */
+  provider: CloudSyncProvider
   connected: boolean
   configured: boolean
   syncing: boolean
@@ -89,6 +98,7 @@ export interface CloudStatus {
   lastSync: string | null
   lastSyncError: string | null
   internetAvailable: boolean | null
+  /** Human-readable label for the connected destination (e.g. gdrive email). */
   email?: string
 }
 
