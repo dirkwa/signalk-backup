@@ -77,6 +77,34 @@ export interface RestoreStatus {
   error?: string
 }
 
+export type CloudSyncMode = 'manual' | 'after_backup' | 'scheduled'
+export type CloudSyncFrequency = 'daily' | 'weekly'
+
+export interface CloudStatus {
+  connected: boolean
+  configured: boolean
+  syncing: boolean
+  syncMode: CloudSyncMode | null
+  syncFrequency: CloudSyncFrequency | null
+  lastSync: string | null
+  lastSyncError: string | null
+  internetAvailable: boolean | null
+  email?: string
+}
+
+export type GDriveAuthState = 'idle' | 'pending' | 'completed' | 'failed'
+
+export interface GDriveAuthInfo {
+  state: GDriveAuthState
+  authUrl: string | null
+  error: string | null
+}
+
+export interface CloudConfigUpdate {
+  syncMode?: CloudSyncMode
+  syncFrequency?: CloudSyncFrequency
+}
+
 interface ApiEnvelope<T> {
   success?: boolean
   data?: T
@@ -151,6 +179,35 @@ export const api = {
   // Direct download URL — caller uses as <a href> or window.open(). No
   // unwrap because it's a binary stream, not JSON.
   downloadUrl: (id: string): string => `${API_BASE}/backups/${encodeURIComponent(id)}/download`,
+
+  // Cloud sync — Google Drive auth + sync. Auth flow: connectGDrive
+  // returns a Google OAuth URL the user opens; the browser is redirected
+  // back to rclone's local listener (port 53682) which the plugin
+  // exposes back to the user. When that path doesn't work (browser on a
+  // different host than rclone), the user pastes the callback URL from
+  // their browser into auth-callback to forward it manually.
+  cloudStatus: () => request<CloudStatus>('/cloud/status'),
+  gdriveStatus: () =>
+    request<{ connected: boolean; configured: boolean; email?: string }>('/cloud/gdrive/status'),
+  gdriveAuthState: () => request<GDriveAuthInfo>('/cloud/gdrive/auth-state'),
+  gdriveConnect: () => request<{ authUrl: string }>('/cloud/gdrive/connect', { method: 'POST' }),
+  gdriveCancel: () => request<{ cancelled: boolean }>('/cloud/gdrive/cancel', { method: 'POST' }),
+  gdriveAuthCallback: (url: string) =>
+    request<{ accepted: boolean }>('/cloud/gdrive/auth-callback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    }),
+  gdriveDisconnect: () =>
+    request<{ disconnected: boolean }>('/cloud/gdrive/disconnect', { method: 'POST' }),
+  cloudSync: () => request<{ started: boolean }>('/cloud/sync', { method: 'POST' }),
+  cloudSyncCancel: () => request<{ cancelled: boolean }>('/cloud/sync/cancel', { method: 'POST' }),
+  cloudConfig: (config: CloudConfigUpdate) =>
+    request<CloudStatus>('/cloud/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    }),
 
   // Plugin's own /status (NOT proxied — no /api prefix).
   pluginStatus: async (): Promise<PluginStatus> => {
