@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ConfigSchema, SCHEMA_DEFAULTS } from '../src/config/schema'
+import { ConfigSchema, SCHEMA_DEFAULTS } from '../src/config/schema.js'
 import { Value } from '@sinclair/typebox/value'
 
 describe('config schema', () => {

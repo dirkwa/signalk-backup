@@ -28,6 +28,6 @@ export default tseslint.config(
     }
   },
   {
-    ignores: ['plugin/**', 'build.js', 'public/**', 'node_modules/**']
+    ignores: ['plugin/**', 'node_modules/**']
   }
 )

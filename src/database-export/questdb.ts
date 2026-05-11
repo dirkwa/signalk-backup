@@ -14,12 +14,12 @@
  * sees a half-written parquet.
  */
 
-import { mkdir, rename, unlink } from 'fs/promises'
-import { createWriteStream } from 'fs'
-import { pipeline } from 'stream/promises'
-import { Readable } from 'stream'
-import { join } from 'path'
-import type { DatabaseExporter, ExportResult, TableExport } from './types'
+import { mkdir, rename, unlink } from 'node:fs/promises'
+import { createWriteStream } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
+import { Readable } from 'node:stream'
+import { join } from 'node:path'
+import type { DatabaseExporter, ExportResult, TableExport } from './types.js'
 
 const QUESTDB_PLUGIN_ID = 'signalk-questdb'
 /** Default base URL — overridable for tests. SignalK normally listens here. */
