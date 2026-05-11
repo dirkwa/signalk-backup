@@ -1,67 +1,51 @@
-/**
- * Reverse proxy from /plugins/signalk-backup/api/* to the backup-server
- * container's loopback API.
- *
- * Why a proxy instead of direct browser → container calls:
- *   - The container binds 127.0.0.1 only; a remote browser can't reach it.
- *   - Single origin (the SignalK server) means no CORS preflights.
- *   - The plugin can intercept/transform later if needed.
- *
- * Streaming both ways: backup downloads are multi-GB ZIPs. We don't
- * `await res.text()` or buffer; we wire the upstream Body to res via
- * Web→Node stream interop.
- */
+// Reverse proxy from /plugins/signalk-backup/api/* to the backup-server's
+// loopback API. Container is loopback-only so a remote browser can't
+// reach it directly; routing through the SignalK origin also avoids CORS.
+// Both directions stream via Readable.fromWeb + stream/promises::pipeline
+// so multi-GB ZIP downloads/uploads don't allocate the body in memory.
 
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { IRouter, Request as ExpressRequest, Response as ExpressResponse } from 'express'
 
-/**
- * Headers that must NOT be forwarded between hops, per RFC 7230 §6.1
- * plus practical extras (host gets rewritten, content-length is computed
- * by undici/fetch from the body stream).
- */
+// Hop-by-hop headers per RFC 7230 §6.1 (must NOT cross a proxy hop), plus
+// host (gets rewritten to upstream) and content-length (recomputed by
+// undici from the streamed body).
 const HOP_BY_HOP_REQUEST_HEADERS = new Set([
   'host',
   'connection',
   'keep-alive',
   'proxy-authorization',
   'te',
-  'trailers',
+  'trailer',
   'transfer-encoding',
   'upgrade',
   'content-length'
 ])
 
+// Same list, response side. content-encoding stays — upstream may have
+// already gzipped and we pass that through unchanged.
 const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
   'connection',
   'keep-alive',
   'transfer-encoding',
   'upgrade',
-  // content-encoding stays — upstream may have already gzipped; we pass through
   'proxy-authenticate'
 ])
 
 export interface ProxyOptions {
   /**
-   * Lazy accessor for the upstream base URL (e.g. `http://127.0.0.1:3010`).
-   * Returns null when the backup-server isn't reachable yet — those
-   * requests get a 503.
+   * Lazy accessor for the upstream base URL — must include the scheme
+   * (e.g. `http://127.0.0.1:3010` or `https://server:3010`). Returns
+   * null when the backup-server isn't ready; those requests get a 503.
    */
   getUpstreamBase: () => string | null
   /** Optional debug logger. */
   log?: (msg: string) => void
 }
 
-/**
- * Mount the proxy at the supplied router. Catches everything under
- * `/api/*` (the SignalK server passes `/plugins/signalk-backup/*` here,
- * with `/plugins/signalk-backup` already stripped).
- *
- * Existing /api/* routes on the same router (currently /api/update/*)
- * MUST be registered BEFORE this — Express matches in registration
- * order. The proxy uses `*` so it would otherwise swallow them.
- */
+// Catches /api/*; the explicit /api/update/{check,apply} routes must
+// register BEFORE this — Express matches in registration order.
 export function registerProxy(router: IRouter, opts: ProxyOptions): void {
   router.all(/^\/api\/.*/, async (req: ExpressRequest, res: ExpressResponse) => {
     const base = opts.getUpstreamBase()
@@ -85,9 +69,8 @@ export function registerProxy(router: IRouter, opts: ProxyOptions): void {
       }
     }
 
-    // The `init` shape uses globalThis.fetch's RequestInit. Cast lets us
-    // attach `body` (a Node Readable stream) and `duplex: 'half'` (undici
-    // requires it for streamed bodies) without dragging in DOM-lib types.
+    // duplex: 'half' is required by undici when body is a Node Readable;
+    // both fields are absent from the DOM RequestInit we'd otherwise import.
     const init: Record<string, unknown> = {
       method: req.method,
       headers
@@ -117,8 +100,6 @@ export function registerProxy(router: IRouter, opts: ProxyOptions): void {
       return
     }
 
-    // pipe upstream Web body → Express Node response. Readable.fromWeb
-    // bridges the two; pipeline takes care of error/close propagation.
     try {
       await pipeline(Readable.fromWeb(upstreamRes.body as never), res)
     } catch (err) {
