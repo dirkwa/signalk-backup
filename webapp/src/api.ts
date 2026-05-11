@@ -58,6 +58,25 @@ export interface SchedulerStatus {
   }
 }
 
+export type RestoreState =
+  | 'idle'
+  | 'preparing'
+  | 'extracting'
+  | 'installing'
+  | 'restarting'
+  | 'verifying'
+  | 'completed'
+  | 'failed'
+  | 'rolling_back'
+  | 'rolled_back'
+
+export interface RestoreStatus {
+  state: RestoreState
+  progress: number
+  statusMessage: string
+  error?: string
+}
+
 interface ApiEnvelope<T> {
   success?: boolean
   data?: T
@@ -105,6 +124,33 @@ export const api = {
     request<{ deleted: string }>(`/backups/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     }),
+
+  // Multipart upload — fetch picks the boundary; do NOT set Content-Type
+  // ourselves or the browser will not append the boundary value.
+  uploadBackup: (file: File, description?: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (description) form.append('description', description)
+    form.append('restoreImmediately', 'false')
+    return request<{ backup: BackupMetadata }>('/backups/upload', {
+      method: 'POST',
+      body: form
+    })
+  },
+
+  startRestore: (id: string) =>
+    request<{ started: boolean }>(`/backups/${encodeURIComponent(id)}/restore`, {
+      method: 'POST'
+    }),
+
+  restoreStatus: () => request<RestoreStatus>('/backups/restore/status'),
+
+  resetRestoreState: () =>
+    request<{ reset: boolean }>('/backups/restore/reset', { method: 'POST' }),
+
+  // Direct download URL — caller uses as <a href> or window.open(). No
+  // unwrap because it's a binary stream, not JSON.
+  downloadUrl: (id: string): string => `${API_BASE}/backups/${encodeURIComponent(id)}/download`,
 
   // Plugin's own /status (NOT proxied — no /api prefix).
   pluginStatus: async (): Promise<PluginStatus> => {
