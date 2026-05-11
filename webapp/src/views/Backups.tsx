@@ -171,6 +171,10 @@ export function Backups() {
 
   const allBackups = list.data?.backups ?? []
   const restoreActive = restore.data ? ACTIVE_RESTORE_STATES.has(restore.data.state) : false
+  // Block ALL row actions while a restore is being kicked off — the polled
+  // `restoreActive` flag only flips on the next 2-s tick, so a fast click
+  // could otherwise fire two restores or a delete during a kickoff.
+  const actionsDisabled = restoreActive || restoringId !== null
 
   return (
     <>
@@ -342,7 +346,7 @@ export function Backups() {
                         outline
                         size="sm"
                         className="me-1"
-                        disabled={restoringId === b.id || restoreActive}
+                        disabled={actionsDisabled}
                         onClick={() => void onRestore(b)}
                       >
                         {restoringId === b.id ? <Spinner size="sm" /> : 'Restore'}
@@ -351,7 +355,7 @@ export function Backups() {
                         color="danger"
                         outline
                         size="sm"
-                        disabled={deletingId === b.id || restoreActive}
+                        disabled={actionsDisabled || deletingId === b.id}
                         onClick={() => void onDelete(b)}
                       >
                         {deletingId === b.id ? <Spinner size="sm" /> : 'Delete'}
