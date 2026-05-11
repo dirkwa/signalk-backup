@@ -7,7 +7,8 @@ import {
   BackupServerAPI,
   ContainerConfig,
   ContainerManagerApi,
-  ContainerResourceLimits
+  ContainerResourceLimits,
+  VolumeIssue
 } from './types.js'
 import { ConfigSchema, Config, SCHEMA_DEFAULTS } from './config/schema.js'
 import { runAllExports } from './database-export/index.js'
@@ -126,6 +127,18 @@ export default function (app: BackupServerAPI): Plugin {
     // Requires signalk-container >= 1.5.0.
     signalkConfigRootMount: SK_MOUNT,
     signalkAccessiblePorts: [API_PORT, OAUTH_PORT],
+    // Baseline mounts for the `local` cloud-sync provider (USB drives,
+    // mounted folders). Both are declared with `ifMissing: 'skip'` so
+    // signalk-container 1.6+ drops them silently on hosts that don't
+    // have /media or /mnt. The backup-server's local-fs-service walks
+    // these inside the container to enumerate USB-style and manual
+    // mount destinations. Discovery returns an empty list when both
+    // are skipped, which is the right fallback (the user can still
+    // configure gdrive or other providers).
+    volumes: {
+      '/host-media': { source: '/media', ifMissing: 'skip' },
+      '/host-mnt': { source: '/mnt', ifMissing: 'skip' }
+    },
     env: {
       PORT: String(API_PORT),
       // The backup engine's own state lives in a plugin-config-data subdir
@@ -138,6 +151,21 @@ export default function (app: BackupServerAPI): Plugin {
     resources: DEFAULT_RESOURCES,
     restart: 'unless-stopped'
   })
+
+  /**
+   * Forward a signalk-container volume policy event to plugin status.
+   * Skipped baseline mounts are normal (host has no /media); aborted
+   * mounts shouldn't happen for our config but we surface them anyway.
+   */
+  const onVolumeIssue = (issue: VolumeIssue): void => {
+    if (issue.action === 'skipped') {
+      app.debug(`baseline mount skipped: ${issue.containerPath} (${issue.reason})`)
+    } else if (issue.action === 'recovered') {
+      app.debug(`baseline mount recovered: ${issue.containerPath}`)
+    } else {
+      app.error(`mount aborted: ${issue.containerPath} (${issue.reason})`)
+    }
+  }
 
   const plugin: Plugin = {
     id: PLUGIN_ID,
@@ -260,7 +288,8 @@ export default function (app: BackupServerAPI): Plugin {
           try {
             await containers.ensureRunning(
               CONTAINER_NAME,
-              buildContainerConfig(tag, currentSettings?.logLevel ?? 'info')
+              buildContainerConfig(tag, currentSettings?.logLevel ?? 'info'),
+              { onVolumeIssue }
             )
           } catch (recreateErr) {
             const msg = `Container removed but recreation failed: ${errMsg(recreateErr)}. Click Update again to retry.`
@@ -361,7 +390,8 @@ export default function (app: BackupServerAPI): Plugin {
       app.setPluginStatus(`Starting ${BACKUP_IMAGE}:${settings.imageTag}...`)
       await containers.ensureRunning(
         CONTAINER_NAME,
-        buildContainerConfig(settings.imageTag, settings.logLevel)
+        buildContainerConfig(settings.imageTag, settings.logLevel),
+        { onVolumeIssue }
       )
 
       // Register with the central update service so users see "update available"
