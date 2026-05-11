@@ -43,10 +43,14 @@ function getContainerManager(): ContainerManagerApi | undefined {
 }
 
 /**
- * Poll for signalk-container's API to appear on globalThis. signalk-container
- * publishes itself only after its own start() finishes; plugin-load order is
- * alphabetical, so on a cold server start "signalk-backup" runs first and
- * getContainerManager() returns undefined for ~hundreds of ms.
+ * Wait for signalk-container's API to be FULLY ready on globalThis —
+ * both the manager object exposed AND its runtime detection complete.
+ *
+ * signalk-container publishes `__signalk_containerManager` synchronously
+ * during its own start() but kicks off `detectRuntime` async, so there's
+ * a ~1-2s window where getRuntime() returns null. signalk-backup loads
+ * BEFORE signalk-container alphabetically and races into that window
+ * unless we wait for both signals.
  */
 async function waitForContainerManager(
   maxMs: number,
@@ -55,7 +59,7 @@ async function waitForContainerManager(
   const deadline = Date.now() + maxMs
   while (Date.now() < deadline) {
     const m = getContainerManager()
-    if (m) return m
+    if (m && m.getRuntime()) return m
     await new Promise((r) => setTimeout(r, intervalMs))
   }
   return getContainerManager()
