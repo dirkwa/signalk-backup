@@ -13,7 +13,7 @@ export type BackupServerAPI = ServerAPI
 //   - src/types.ts
 //   - src/updates/types.ts
 //
-// Last synced against signalk-container: v0.1.6
+// Last synced against signalk-container: v1.6.0 (VolumeSpec + onVolumeIssue)
 
 export type ContainerState = 'running' | 'stopped' | 'missing' | 'no-runtime'
 
@@ -34,11 +34,55 @@ export interface ContainerResourceLimits {
   oomScoreAdj?: number | null
 }
 
+/**
+ * Per-volume host-source policy. signalk-container >= 1.6.0 honours these
+ * for volume entries declared as `{ source, ifMissing }` instead of the
+ * bare-string form.
+ */
+export interface VolumeSpec {
+  /** Host path (absolute) or named-volume identifier. */
+  source: string
+  /**
+   * What signalk-container should do when `source` is a host path that
+   * doesn't exist:
+   *  - 'create' (default, same as bare string): runtime auto-creates.
+   *  - 'skip': drop the volume; container starts without the mount.
+   *    onVolumeIssue fires with action='skipped'.
+   *  - 'abort': throw from ensureRunning. onVolumeIssue fires before throw.
+   */
+  ifMissing?: 'create' | 'skip' | 'abort'
+}
+
+/**
+ * Single policy event for ensureRunning's onVolumeIssue callback.
+ *  - 'skipped':   ifMissing='skip' volume's source was missing; dropped.
+ *  - 'aborted':   ifMissing='abort' volume's source was missing; throwing.
+ *  - 'recovered': previously-missing source reappeared; container recreated.
+ */
+export interface VolumeIssue {
+  containerPath: string
+  source: string
+  action: 'skipped' | 'aborted' | 'recovered'
+  reason: string
+}
+
+/** Optional config passed to ensureRunning(). Superset of HealthCheckOptions. */
+export interface EnsureRunningOptions {
+  /** Receives one event per volume that hits a policy decision. */
+  onVolumeIssue?: (issue: VolumeIssue) => void | Promise<void>
+}
+
 export interface ContainerConfig {
   image: string
   tag: string
   ports?: Record<string, string>
-  volumes?: Record<string, string>
+  /**
+   * Per-volume bind config. Bare string is shorthand for
+   * `{ source, ifMissing: 'create' }`. Use the VolumeSpec form for
+   * optional or required user-managed paths (USB drives, NFS mounts,
+   * deployment secrets).
+   */
+  volumes?: Record<string, string | VolumeSpec>
   env?: Record<string, string>
   restart?: 'no' | 'unless-stopped' | 'always'
   command?: string[]
@@ -136,7 +180,11 @@ export interface ContainerManagerApi {
   pullImage: (image: string, onProgress?: (msg: string) => void) => Promise<void>
   imageExists: (image: string) => Promise<boolean>
   getImageDigest: (imageOrContainer: string) => Promise<string | null>
-  ensureRunning: (name: string, config: ContainerConfig) => Promise<void>
+  ensureRunning: (
+    name: string,
+    config: ContainerConfig,
+    options?: EnsureRunningOptions
+  ) => Promise<void>
   start: (name: string) => Promise<void>
   stop: (name: string) => Promise<void>
   remove: (name: string) => Promise<void>

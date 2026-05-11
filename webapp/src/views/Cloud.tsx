@@ -18,18 +18,33 @@ import {
   formatDate,
   type CloudStatus,
   type CloudSyncFrequency,
-  type CloudSyncMode
+  type CloudSyncMode,
+  type CloudSyncProvider
 } from '../api'
 import { useApi } from '../useApi'
+import { LocalConfigureForm } from '../components/LocalConfigureForm'
+
+function providerLabel(provider: CloudSyncProvider): string {
+  switch (provider) {
+    case 'gdrive':
+      return 'Drive'
+    case 'local':
+      return 'Local destination'
+  }
+}
 
 function StatusBadges({ status }: { status: CloudStatus }) {
+  const isLocal = status.provider === 'local'
   return (
     <div className="mb-2 d-flex gap-2 flex-wrap">
       <Badge color={status.connected ? 'success' : 'secondary'}>
-        {status.connected ? 'Drive connected' : 'Not connected'}
+        {status.connected
+          ? `${providerLabel(status.provider)} connected`
+          : `${providerLabel(status.provider)} not configured`}
       </Badge>
       {status.syncing && <Badge color="info">Syncing</Badge>}
-      {status.internetAvailable === false && <Badge color="warning">Offline</Badge>}
+      {/* Internet check is only meaningful for rclone-backed providers (gdrive). */}
+      {!isLocal && status.internetAvailable === false && <Badge color="warning">Offline</Badge>}
     </div>
   )
 }
@@ -201,10 +216,42 @@ function ConnectFlow({ onDone, onError }: { onDone: () => void; onError: (msg: s
 
 export function Cloud() {
   const cloud = useApi(() => api.cloudStatus(), { intervalMs: 5000 })
+  const local = useApi(() => api.localStatus(), { intervalMs: 5000 })
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const [busy, setBusy] = useState<'sync' | 'cancel' | 'disconnect' | 'config' | null>(null)
+  const [busy, setBusy] = useState<'sync' | 'cancel' | 'disconnect' | 'config' | 'switch' | null>(
+    null
+  )
   const [confirmDisconnect, setConfirmDisconnect] = useState(false)
+  // The dropdown reflects user intent immediately so picking "Local"
+  // from the gdrive view surfaces the configure form. Server provider
+  // doesn't actually flip until configure succeeds.
+  const [pendingProvider, setPendingProvider] = useState<CloudSyncProvider | null>(null)
+  const activeProvider: CloudSyncProvider = pendingProvider ?? cloud.data?.provider ?? 'gdrive'
+
+  /**
+   * Switch the active provider. For gdrive ↔ local, this just rewrites
+   * settings.cloudSync.provider; the backend keeps prior config so
+   * switching back doesn't require re-authing or re-picking a path.
+   *
+   * Local → Gdrive flips immediately via /local/disconnect.
+   * Gdrive → Local opens the LocalConfigureForm; selection there flips
+   * provider via /local/configure (which sets provider='local').
+   */
+  const switchProviderToGdrive = async (): Promise<void> => {
+    setBusy('switch')
+    setError(null)
+    try {
+      await api.localDisconnect()
+      setPendingProvider(null)
+      cloud.refresh()
+      local.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const onSync = async (): Promise<void> => {
     setBusy('sync')
@@ -291,7 +338,7 @@ export function Cloud() {
 
       <Card className="mb-3">
         <CardHeader>
-          <strong>Google Drive</strong>
+          <strong>Destination</strong>
         </CardHeader>
         <CardBody>
           {cloud.loading && !cloud.data ? (
@@ -303,53 +350,139 @@ export function Cloud() {
           ) : cloud.data ? (
             <>
               <StatusBadges status={cloud.data} />
-              {cloud.data.email && (
-                <p className="text-muted small mb-2">Account: {cloud.data.email}</p>
-              )}
-              {cloud.data.connected ? (
+
+              <FormGroup className="mb-3">
+                <Label for="provider-select">Where backups go</Label>
+                <Input
+                  id="provider-select"
+                  type="select"
+                  value={activeProvider}
+                  disabled={busy !== null}
+                  onChange={(e) => {
+                    const next = e.target.value as CloudSyncProvider
+                    if (next === activeProvider) return
+                    if (next === 'gdrive') {
+                      // Two cases land here:
+                      //   1. server provider is local → really switch.
+                      //   2. server provider is already gdrive and the user
+                      //      is just cancelling a pending local selection
+                      //      (they picked "Local" then changed their mind).
+                      //      Calling /local/disconnect in case 2 would clobber
+                      //      lastSync on the existing gdrive config — avoid it.
+                      if (cloud.data?.provider === 'gdrive') {
+                        setPendingProvider(null)
+                      } else {
+                        void switchProviderToGdrive()
+                      }
+                    } else {
+                      // Surface the LocalConfigureForm immediately. Server
+                      // provider only flips once the user picks a path and
+                      // /local/configure succeeds.
+                      setPendingProvider('local')
+                    }
+                  }}
+                >
+                  <option value="gdrive">Google Drive</option>
+                  <option value="local">Local drive / mounted folder</option>
+                </Input>
+              </FormGroup>
+
+              {activeProvider === 'gdrive' && (
                 <>
-                  {confirmDisconnect ? (
-                    <div className="d-flex gap-2 align-items-center">
-                      <span>Really disconnect?</span>
-                      <Button
-                        color="danger"
-                        size="sm"
-                        disabled={busy === 'disconnect'}
-                        onClick={() => void onDisconnect()}
-                      >
-                        {busy === 'disconnect' ? <Spinner size="sm" /> : 'Disconnect'}
-                      </Button>
-                      <Button
-                        color="secondary"
-                        outline
-                        size="sm"
-                        onClick={() => {
-                          setConfirmDisconnect(false)
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
+                  {cloud.data.email && (
+                    <p className="text-muted small mb-2">Account: {cloud.data.email}</p>
+                  )}
+                  {cloud.data.connected ? (
+                    <>
+                      {confirmDisconnect ? (
+                        <div className="d-flex gap-2 align-items-center">
+                          <span>Really disconnect?</span>
+                          <Button
+                            color="danger"
+                            size="sm"
+                            disabled={busy === 'disconnect'}
+                            onClick={() => void onDisconnect()}
+                          >
+                            {busy === 'disconnect' ? <Spinner size="sm" /> : 'Disconnect'}
+                          </Button>
+                          <Button
+                            color="secondary"
+                            outline
+                            size="sm"
+                            onClick={() => {
+                              setConfirmDisconnect(false)
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          color="danger"
+                          outline
+                          onClick={() => {
+                            setConfirmDisconnect(true)
+                          }}
+                        >
+                          Disconnect
+                        </Button>
+                      )}
+                    </>
                   ) : (
-                    <Button
-                      color="danger"
-                      outline
-                      onClick={() => {
-                        setConfirmDisconnect(true)
+                    <ConnectFlow
+                      onDone={() => {
+                        cloud.refresh()
+                        setSuccess('Google Drive connected')
                       }}
-                    >
-                      Disconnect
-                    </Button>
+                      onError={setError}
+                    />
                   )}
                 </>
-              ) : (
-                <ConnectFlow
-                  onDone={() => {
-                    cloud.refresh()
-                    setSuccess('Google Drive connected')
-                  }}
-                  onError={setError}
-                />
+              )}
+
+              {activeProvider === 'local' && (
+                <>
+                  {local.error && (
+                    <Alert color="danger" className="mb-2">
+                      Failed to read local destination status: {local.error}
+                    </Alert>
+                  )}
+                  {local.data?.connected ? (
+                    <>
+                      <p className="text-muted small mb-2">
+                        Backing up to <code>{local.data.hostPath ?? local.data.containerPath}</code>
+                        {local.data.freeBytes != null && (
+                          <> — {Math.round(local.data.freeBytes / 1e9)} GB free</>
+                        )}
+                      </p>
+                      <Button
+                        color="danger"
+                        outline
+                        disabled={busy !== null}
+                        onClick={() => void switchProviderToGdrive()}
+                      >
+                        {busy === 'switch' ? <Spinner size="sm" /> : 'Switch back to Google Drive'}
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      {local.data?.error && (
+                        <Alert color="warning" className="mb-2">
+                          {local.data.error}
+                        </Alert>
+                      )}
+                      <LocalConfigureForm
+                        onConfigured={() => {
+                          setPendingProvider(null)
+                          cloud.refresh()
+                          local.refresh()
+                          setSuccess('Local destination configured')
+                        }}
+                        onError={setError}
+                      />
+                    </>
+                  )}
+                </>
               )}
             </>
           ) : null}

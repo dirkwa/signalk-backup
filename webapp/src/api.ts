@@ -81,11 +81,39 @@ export type CloudSyncMode = 'manual' | 'after_backup' | 'scheduled'
 export type CloudSyncFrequency = 'daily' | 'weekly'
 
 /**
- * Cloud sync provider identifier. Currently only `gdrive` is implemented
- * end-to-end. Future variants (`smb`, `local`, …) will extend this union
- * — the field is on every status payload so the UI can branch on it now.
+ * Cloud sync provider identifier.
+ *
+ * - 'gdrive': Google Drive via rclone (OAuth)
+ * - 'local': a host path (USB drive, NFS mount, anything mounted under
+ *   /media or /mnt). No rclone — kopia writes to the path directly.
+ *
+ * Future variants ('smb', …) extend this union the same way.
  */
-export type CloudSyncProvider = 'gdrive'
+export type CloudSyncProvider = 'gdrive' | 'local'
+
+export interface LocalCandidate {
+  /** Container-side path — what gets persisted via /local/configure. */
+  containerPath: string
+  /** Host-side path for display in the UI. */
+  hostPath: string
+  /** Free bytes on the destination's filesystem; null when unknown. */
+  freeBytes: number | null
+  /** Total bytes on the destination's filesystem; null when unknown. */
+  totalBytes: number | null
+}
+
+export interface LocalStatus {
+  /** True when a local destination is configured AND reachable + writable. */
+  connected: boolean
+  /** Always true for local (no auth flow). */
+  configured: boolean
+  containerPath?: string
+  hostPath?: string
+  freeBytes?: number
+  totalBytes?: number
+  /** Why connected is false, if it isn't. */
+  error?: string
+}
 
 export interface CloudStatus {
   /** Active cloud provider. */
@@ -243,6 +271,20 @@ export const api = {
     }),
   gdriveDisconnect: () =>
     request<{ disconnected: boolean }>('/cloud/gdrive/disconnect', { method: 'POST' }),
+
+  // Local-filesystem destination (USB drive / mounted folder). No auth flow,
+  // just a path. Discovery walks /host-media + /host-mnt baseline mounts.
+  localStatus: () => request<LocalStatus>('/cloud/local/status'),
+  localDiscover: () => request<{ candidates: LocalCandidate[] }>('/cloud/local/discover'),
+  localConfigure: (containerPath: string, hostPath?: string) =>
+    request<CloudStatus>('/cloud/local/configure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ containerPath, hostPath })
+    }),
+  localDisconnect: () =>
+    request<{ disconnected: boolean }>('/cloud/local/disconnect', { method: 'POST' }),
+
   cloudSync: () => request<{ started: boolean }>('/cloud/sync', { method: 'POST' }),
   cloudSyncCancel: () => request<{ cancelled: boolean }>('/cloud/sync/cancel', { method: 'POST' }),
   cloudConfig: (config: CloudConfigUpdate) =>

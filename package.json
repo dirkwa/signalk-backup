@@ -51,7 +51,7 @@
     "@sinclair/typebox": "^0.34.0"
   },
   "peerDependencies": {
-    "signalk-container": ">=0.1.6"
+    "signalk-container": ">=1.6.0"
   },
   "peerDependenciesMeta": {
     "signalk-container": {
