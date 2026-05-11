@@ -1,0 +1,169 @@
+language: en-US
+
+reviews:
+  profile: assertive
+  auto_review:
+    enabled: true
+    drafts: false
+  high_level_summary_instructions: |
+    Write summaries in present tense. Describe what the code does, not what
+    it did. Skip filler like "This PR" — go straight to the change.
+
+  path_instructions:
+    - path: '**/*'
+      instructions: |
+        ## Scope
+
+        Focus on files changed since `main`. Think about how changes interact
+        with the rest of the codebase, not just the diff in isolation.
+
+        signalk-backup is a **SignalK plugin + webapp** pair shipped in one
+        npm package. It does two things:
+
+        1. **Plugin (`src/`, plain Node, runs in SignalK server process)**
+           - Asks `signalk-container` to run the `signalk-backup-server`
+             container.
+           - Exposes a thin HTTP surface at `/plugins/signalk-backup/api/*`:
+             a status endpoint + a reverse proxy that forwards everything
+             else to the backup-server container.
+        2. **Webapp (`webapp/`, Vite + React + reactstrap, served via SignalK
+           `signalk-webapp` keyword at `/signalk-backup/`)**
+           - SPA with hash routing (no react-router).
+           - Inherits SignalK admin look-and-feel by fetching
+             `/admin/.vite/manifest.json` and injecting the admin CSS link
+             into `<head>` before React mounts.
+           - All API calls hit the plugin proxy at
+             `/plugins/signalk-backup/api/*` — same origin, no CORS, inherits
+             SignalK auth.
+
+        ## ESM / TypeScript strict / Node 22+ / Vite 8 + React 19
+
+        - `"type": "module"` — relative imports use the `.js` suffix
+          (NodeNext). Do not suggest dropping it.
+        - tsconfig is strict. Avoid `any`. The webapp has its own
+          `tsconfig.webapp.json` because of the JSX/DOM types.
+        - Node `>= 22.5.0`. Native fetch on the plugin side; browser fetch
+          in the webapp.
+        - React 19 + reactstrap. **Do not** suggest deprecated `FormEvent`
+          types — inline `e.preventDefault()` is the React 19 idiom.
+
+        ## Plugin → container integration
+
+        - Plugin lifecycle (`start` / `stop`) calls into
+          `signalk-container`'s globalThis API
+          (`globalThis.__signalk_containerManager`). The plugin must wait for
+          both the manager to publish AND `getRuntime()` to return non-null
+          before using it — see `waitForContainerManager()`. This was a real
+          bug (PR #14); a `whenReady()` helper exists in newer
+          signalk-container versions (#32) but the plugin's polling code is
+          the cross-version-compatible fallback.
+        - `BACKUP_IMAGE` and `CONTAINER_NAME` are module-level constants.
+          Don't extract them as config unless asked.
+        - The container is started with `signalkConfigRootMount` (entire
+          SignalK config tree, not just the per-plugin subdir) +
+          `signalkAccessiblePorts: [API_PORT, OAUTH_PORT]`. Loosening either
+          would weaken the privacy boundary — the container is supposed to
+          stay loopback-internal.
+
+        ## Proxy module (`src/proxy.ts`)
+
+        - Streams body bytes, does **not** buffer. Multi-GB ZIP downloads
+          and uploads pass through unbuffered.
+        - Hop-by-hop headers (Connection, Keep-Alive, Transfer-Encoding,
+          Upgrade, Proxy-Authorization, Trailer, TE) must be stripped per
+          RFC 7230 — don't suggest "simpler" forwarders that ignore this.
+        - Preserves the scheme on `containerAddress` (http:// vs https://)
+          so external-mode HTTPS upstreams aren't downgraded.
+
+        ## Webapp conventions
+
+        - **Hash router**, not react-router. The `currentRoute` state
+          watches `window.location.hash`. Don't suggest pulling in
+          react-router-dom.
+        - **API envelope unwrap** in `webapp/src/api.ts` — server wraps
+          responses in `{success, data | error}` and `request<T>` throws on
+          `success: false` so the UI sees a real `Error`. Don't suggest
+          callers re-check `success`.
+        - **`ReturnType<typeof setInterval>`** for timer handles in
+          browser code, not `NodeJS.Timeout` (which is a Node type that
+          shouldn't appear in webapp/).
+        - **CSS bootstrap before React mount** — `webapp/index.html` runs
+          an inline module script that awaits the admin-CSS `<link>` load
+          before dynamic-importing `main.tsx`. This is intentional; styles
+          must be present on first paint.
+        - **Discriminated CSS-shape handling** — the admin Vite manifest
+          has CSS either as a top-level `style.css` entry with a `.file`
+          field OR as a `.css` array on entries. Both branches must be
+          kept; SignalK may serve either depending on version.
+        - **No new top-level dependencies** without justification. Vite
+          tree-shakes, but every dep is a maintenance liability for a
+          plugin on a Pi. Pull from `reactstrap` first.
+
+        ## Passwords in the UI
+
+        - The backup password reveal flow is **masked-by-default with an
+          eye toggle + Copy button**. This is deliberate (PR review on
+          #13): always-visible exposes shoulder-surfers/screenshots; never
+          shown means users can't write it down for safe-keeping.
+        - Don't suggest dropping the reveal toggle. Don't suggest
+          encrypting client-side — the password is a key, not auth.
+
+        ## Echo comments
+
+        Flag any comment that merely restates what the code already says.
+        Examples to flag:
+        - `// Renders the backup list` above the Backups component
+        - `// HTTP GET /status` above `request('/status')`
+        Replace with comments explaining *why*, not *what*. Or delete.
+
+        ## Documentation drift risk
+
+        Flag any `.md` file that contains:
+        - Specific code snippets, function signatures, or config values
+          likely to fall out of sync as code evolves.
+        - Step-by-step build/development instructions that duplicate or
+          shadow the code itself.
+        - Implementation status, progress markers, "currently implemented
+          as X" wording. Build narratives belong in PR descriptions, not
+          in repo docs.
+
+        ## Leftover crumbs from intermediate commits
+
+        Flag references in the current diff to symbols, files, or
+        approaches that no longer exist on this branch — old function
+        names in comments, stale TODOs from a superseded approach, etc.
+
+        ## Unchecked items in test plans
+
+        If the PR description has a checklist with unchecked items, flag
+        it. Either the work isn't done, or the unchecked items should be
+        removed.
+
+        ## Commit / PR conventions
+
+        - Commit messages: conventional commits format
+          (`feat:`, `fix:`, `chore:`, `refactor:`, `docs:`, `test:`,
+          `build:`, `ci:`). Imperative mood, ≤72 char subject.
+        - PR title becomes the squash commit subject — must be a
+          meaningful one-liner.
+        - **No AI attribution** in commits, PR bodies, or code. Don't
+          mention Claude, AI, or add `Co-Authored-By` trailers.
+        - **No version bumps** in feature/fix PRs. Versions are bumped in
+          dedicated `chore(release):` PRs only when the user explicitly
+          asks.
+
+        ## What NOT to flag
+
+        These are intentional:
+        - `as const` literals in discriminated-union construction.
+        - The dual-check `waitForContainerManager` polling pattern — see
+          plugin → container integration above. This isn't redundant; it
+          guards a real race.
+        - Hash routing instead of react-router — chosen on purpose.
+        - The CSS-bootstrap-before-React-mount sequence — intentional, see
+          the inline script in `webapp/index.html`.
+        - The `webapp/src/api.ts` envelope unwrap — required, server wraps
+          everything.
+        - `request<T>` throwing on `success:false` — required, see above.
+        - Inline `e.preventDefault()` in form handlers instead of typed
+          `FormEvent` callbacks — React 19 idiom.
