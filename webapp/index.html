@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <title>SignalK Backup</title>
+
+    <!--
+      Inherit the SignalK Admin UI's stylesheet. The admin UI is built
+      with Vite and emits content-hashed CSS, so we read its manifest at
+      load time and inject the discovered <link> tags. Runs synchronously
+      *before* React mounts so the first paint is themed.
+
+      Falls back gracefully: if the manifest fetch fails (older SignalK
+      server without the endpoint, or the admin UI hasn't been built),
+      we just continue without the admin styles — the page still works,
+      it just looks unstyled.
+    -->
+    <script>
+      ;(async () => {
+        try {
+          const res = await fetch('/admin/.vite/manifest.json')
+          if (!res.ok) return
+          const manifest = await res.json()
+          for (const entry of Object.values(manifest)) {
+            if (!entry || !entry.isEntry) continue
+            for (const css of entry.css ?? []) {
+              const link = document.createElement('link')
+              link.rel = 'stylesheet'
+              link.href = '/admin/' + css
+              document.head.appendChild(link)
+            }
+          }
+        } catch (err) {
+          console.warn('signalk-backup: admin CSS not available', err)
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
