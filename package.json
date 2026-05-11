@@ -1,6 +1,6 @@
 {
   "name": "signalk-backup",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Scheduled deduplicated backups of SignalK config to local storage and Google Drive (via Kopia + rclone)",
   "main": "plugin/index.js",
   "type": "module",
