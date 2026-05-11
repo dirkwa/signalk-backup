@@ -23,14 +23,24 @@
           const res = await fetch('/admin/.vite/manifest.json')
           if (!res.ok) return
           const manifest = await res.json()
+          const cssFiles = new Set()
+          // Two shapes are common: an entry whose `css` array lists its
+          // stylesheet imports, OR a top-level entry whose `file` itself
+          // ends in `.css` (when Vite extracts a global stylesheet). The
+          // current SignalK admin uses the second shape; older builds and
+          // the docs example use the first. Cover both.
           for (const entry of Object.values(manifest)) {
-            if (!entry || !entry.isEntry) continue
-            for (const css of entry.css ?? []) {
-              const link = document.createElement('link')
-              link.rel = 'stylesheet'
-              link.href = '/admin/' + css
-              document.head.appendChild(link)
+            if (!entry) continue
+            for (const css of entry.css ?? []) cssFiles.add(css)
+            if (typeof entry.file === 'string' && entry.file.endsWith('.css')) {
+              cssFiles.add(entry.file)
             }
+          }
+          for (const css of cssFiles) {
+            const link = document.createElement('link')
+            link.rel = 'stylesheet'
+            link.href = '/admin/' + css
+            document.head.appendChild(link)
           }
         } catch (err) {
           console.warn('signalk-backup: admin CSS not available', err)
