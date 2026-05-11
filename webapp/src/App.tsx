@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import { Container, Nav, NavItem, NavLink } from 'reactstrap'
 import { Dashboard } from './views/Dashboard'
 import { Backups } from './views/Backups'
+import { Cloud } from './views/Cloud'
 
-type Route = 'dashboard' | 'backups'
+type Route = 'dashboard' | 'backups' | 'cloud'
 
 const ROUTES: { id: Route; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'backups', label: 'Backups' }
+  { id: 'backups', label: 'Backups' },
+  { id: 'cloud', label: 'Cloud sync' }
 ]
 
 // Hash-routing keeps us off react-router and avoids the history API
@@ -60,6 +62,7 @@ export function App() {
 
       {route === 'dashboard' && <Dashboard />}
       {route === 'backups' && <Backups />}
+      {route === 'cloud' && <Cloud />}
     </Container>
   )
 }
