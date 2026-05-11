@@ -50,7 +50,7 @@ export function useApi<T>(
     const cancelled = { current: false }
     setLoading(true)
     void tick(cancelled)
-    let timer: NodeJS.Timeout | undefined
+    let timer: ReturnType<typeof setInterval> | undefined
     if (intervalMs && intervalMs > 0) {
       timer = setInterval(() => {
         void tick(cancelled)

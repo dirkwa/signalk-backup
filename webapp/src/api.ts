@@ -71,15 +71,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${path} → ${res.status}: ${text.slice(0, 200)}`)
   }
   const body = (await res.json()) as unknown
-  // Backup-server wraps responses in { success, data }; unwrap if so.
-  if (
-    body !== null &&
-    typeof body === 'object' &&
-    'success' in body &&
-    (body as ApiEnvelope<T>).success === true &&
-    'data' in body
-  ) {
-    return (body as ApiEnvelope<T>).data as T
+  // Backup-server wraps responses in { success, data | error }. Unwrap
+  // success → return data; success === false → throw with the server's
+  // error message so the UI sees a real Error rather than a malformed T.
+  if (body !== null && typeof body === 'object' && 'success' in body) {
+    const env = body as ApiEnvelope<T>
+    if (env.success === false) {
+      const code = env.error?.code ? ` [${env.error.code}]` : ''
+      throw new Error(`${path}${code}: ${env.error?.message ?? 'unknown server error'}`)
+    }
+    if (env.success === true && 'data' in body) {
+      return env.data as T
+    }
   }
   return body as T
 }
