@@ -105,6 +105,30 @@ export interface CloudConfigUpdate {
   syncFrequency?: CloudSyncFrequency
 }
 
+export interface DataDirEntry {
+  name: string
+  size: number
+  excluded: boolean
+  type?: 'dir' | 'history'
+}
+
+export interface PluginDataDirEntry {
+  name: string
+  size: number
+  excluded: boolean
+  /** If true, the user cannot un-exclude this dir (DB plugins, our own state). */
+  lockedExcluded?: boolean
+  /** Human-readable reason the dir is locked-excluded. */
+  lockReason?: string
+}
+
+export interface PasswordStatus {
+  hasCustomPassword: boolean
+  /** Server returns the current password value here, even when default. UI
+   *  never displays it — only the boolean above drives the UX. */
+  password?: string
+}
+
 interface ApiEnvelope<T> {
   success?: boolean
   data?: T
@@ -208,6 +232,44 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config)
     }),
+
+  // Scheduler control — start/stop the backup-server's internal scheduler.
+  // Returns just { enabled }; the richer SchedulerStatus shape comes from
+  // GET /backups/scheduler (re-fetched after a toggle).
+  schedulerStart: () =>
+    request<{ enabled: boolean }>('/backups/scheduler/start', { method: 'POST' }),
+  schedulerStop: () => request<{ enabled: boolean }>('/backups/scheduler/stop', { method: 'POST' }),
+
+  // Exclusions — the list of glob patterns kopia skips during backup.
+  // The patterns set here is the user-configurable layer; the server
+  // adds always-excluded patterns (kopia repo, etc) and live-DB
+  // defaults on top.
+  exclusions: () => request<{ exclusions: string[] }>('/backups/exclusions'),
+  setExclusions: (exclusions: string[]) =>
+    request<{ exclusions: string[] }>('/backups/exclusions', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ exclusions })
+    }),
+
+  // Read-only directory listings the Settings UI uses to drive the
+  // exclusions checklist. Both list every candidate dir with its current
+  // excluded state derived from the patterns above + the always/locked
+  // server-side rules.
+  dataDirs: () => request<DataDirEntry[]>('/backups/data-dirs'),
+  pluginDataDirs: () => request<PluginDataDirEntry[]>('/backups/plugin-data-dirs'),
+
+  // Encryption password — kopia's repo password. Default is a known
+  // string; once a user sets a custom one, hasCustomPassword goes true.
+  // We never display the actual value in the UI.
+  passwordStatus: () => request<PasswordStatus>('/backups/password'),
+  setPassword: (password: string) =>
+    request<{ updated: boolean }>('/backups/password', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password, confirmPassword: password })
+    }),
+  resetPassword: () => request<{ reset: boolean }>('/backups/password', { method: 'DELETE' }),
 
   // Plugin's own /status (NOT proxied — no /api prefix).
   pluginStatus: async (): Promise<PluginStatus> => {
