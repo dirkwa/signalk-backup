@@ -2,6 +2,7 @@ import path from 'node:path'
 import { Plugin } from '@signalk/server-api'
 import { Request, Response, IRouter } from 'express'
 import { BackupClient } from './backup-client.js'
+import { registerProxy } from './proxy.js'
 import {
   BackupServerAPI,
   ContainerConfig,
@@ -283,6 +284,15 @@ export default function (app: BackupServerAPI): Plugin {
         } catch (err) {
           app.setPluginError(`Update failed: ${errMsg(err)}`)
           res.status(500).json({ error: errMsg(err) })
+        }
+      })
+
+      // Proxy /api/* to the backup-server. Registered LAST so the
+      // explicit /api/update/{check,apply} above match first.
+      registerProxy(router, {
+        getUpstreamBase: () => (containerAddress ? `http://${containerAddress}` : null),
+        log: (msg) => {
+          app.debug(msg)
         }
       })
     }
