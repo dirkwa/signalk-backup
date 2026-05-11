@@ -53,10 +53,13 @@
     "@signalk/server-api": "^2.24.0",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
+    "@types/supertest": "^7.2.0",
     "eslint": "^10.3.0",
     "eslint-config-prettier": "^10.0.0",
     "eslint-plugin-prettier": "^5.0.0",
+    "express": "^5.2.1",
     "prettier": "^3.0.0",
+    "supertest": "^7.2.2",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.0.0",
     "vitest": "^4.1.5"

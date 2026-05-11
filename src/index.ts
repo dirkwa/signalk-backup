@@ -2,6 +2,7 @@ import path from 'node:path'
 import { Plugin } from '@signalk/server-api'
 import { Request, Response, IRouter } from 'express'
 import { BackupClient } from './backup-client.js'
+import { registerProxy } from './proxy.js'
 import {
   BackupServerAPI,
   ContainerConfig,
@@ -285,6 +286,17 @@ export default function (app: BackupServerAPI): Plugin {
           res.status(500).json({ error: errMsg(err) })
         }
       })
+
+      // Proxy /api/* to the backup-server. Registered LAST so the
+      // explicit /api/update/{check,apply} above match first.
+      // containerAddress includes the scheme (http:// or https://) so
+      // external-mode HTTPS upstreams aren't downgraded.
+      registerProxy(router, {
+        getUpstreamBase: () => containerAddress,
+        log: (msg) => {
+          app.debug(msg)
+        }
+      })
     }
   }
 
@@ -299,7 +311,8 @@ export default function (app: BackupServerAPI): Plugin {
         return
       }
       client = new BackupClient(url)
-      containerAddress = url.replace(/^https?:\/\//, '')
+      // Keep the scheme so the proxy can route HTTPS external upstreams.
+      containerAddress = url
       try {
         await client.waitForReady(15_000)
         app.setPluginStatus(`Connected to external backup-server at ${url}`)
@@ -366,12 +379,15 @@ export default function (app: BackupServerAPI): Plugin {
       if (!addr) {
         throw new Error('Could not resolve container address')
       }
-      containerAddress = addr
+      // Container is always plain HTTP on the host loopback; storing the
+      // full URL keeps the format consistent with external-mode (which
+      // may be HTTPS) so the proxy can use the same value as-is.
+      containerAddress = `http://${addr}`
 
       // `client` stays null until /api/health succeeds, so /status's
       // `ready: client !== null` reports the truthful upstream-reachable
       // signal rather than just "we know the address."
-      const pending = new BackupClient(`http://${addr}`)
+      const pending = new BackupClient(containerAddress)
       app.setPluginStatus('Waiting for backup-server to become ready...')
       await pending.waitForReady(60_000)
       client = pending
