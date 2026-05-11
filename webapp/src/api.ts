@@ -80,7 +80,16 @@ export interface RestoreStatus {
 export type CloudSyncMode = 'manual' | 'after_backup' | 'scheduled'
 export type CloudSyncFrequency = 'daily' | 'weekly'
 
+/**
+ * Cloud sync provider identifier. Currently only `gdrive` is implemented
+ * end-to-end. Future variants (`smb`, `local`, …) will extend this union
+ * — the field is on every status payload so the UI can branch on it now.
+ */
+export type CloudSyncProvider = 'gdrive'
+
 export interface CloudStatus {
+  /** Active cloud provider. */
+  provider: CloudSyncProvider
   connected: boolean
   configured: boolean
   syncing: boolean
@@ -89,6 +98,7 @@ export interface CloudStatus {
   lastSync: string | null
   lastSyncError: string | null
   internetAvailable: boolean | null
+  /** Human-readable label for the connected destination (e.g. gdrive email). */
   email?: string
 }
 
@@ -211,7 +221,15 @@ export const api = {
   // exposes back to the user. When that path doesn't work (browser on a
   // different host than rclone), the user pastes the callback URL from
   // their browser into auth-callback to forward it manually.
-  cloudStatus: () => request<CloudStatus>('/cloud/status'),
+  // Older backup-server images (pre-multi-provider refactor) don't include
+  // `provider` in the response. Default it to `gdrive` so the type stays
+  // honest at the API boundary and downstream code can rely on a defined
+  // value. Drop the default once the floor backup-server version ships
+  // with `provider`.
+  cloudStatus: async (): Promise<CloudStatus> => {
+    const raw = await request<Partial<CloudStatus> & Omit<CloudStatus, 'provider'>>('/cloud/status')
+    return { ...raw, provider: raw.provider ?? 'gdrive' }
+  },
   gdriveStatus: () =>
     request<{ connected: boolean; configured: boolean; email?: string }>('/cloud/gdrive/status'),
   gdriveAuthState: () => request<GDriveAuthInfo>('/cloud/gdrive/auth-state'),
