@@ -51,6 +51,10 @@ function ConnectFlow({ onDone, onError }: { onDone: () => void; onError: (msg: s
   const startedAtRef = useRef<number>(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
   const windowRef = useRef<Window | null>(null)
+  // A ref guard (not state) so a fast double-click is rejected without
+  // waiting for React to re-render — the click handler reads the latest
+  // value synchronously.
+  const connectingRef = useRef(false)
 
   const stopPolling = (): void => {
     if (pollRef.current) {
@@ -63,10 +67,13 @@ function ConnectFlow({ onDone, onError }: { onDone: () => void; onError: (msg: s
   useEffect(() => {
     return () => {
       stopPolling()
+      connectingRef.current = false
     }
   }, [])
 
   const onConnect = async (): Promise<void> => {
+    if (connectingRef.current) return
+    connectingRef.current = true
     // Pre-open a window during the user gesture (mobile Safari etc. block
     // window.open from outside a click handler). We'll set its location
     // to the OAuth URL once we have it.
@@ -88,11 +95,13 @@ function ConnectFlow({ onDone, onError }: { onDone: () => void; onError: (msg: s
             const state = await api.gdriveAuthState()
             if (state.state === 'completed') {
               stopPolling()
+              connectingRef.current = false
               setShowFallback(false)
               setCallbackUrl('')
               onDone()
             } else if (state.state === 'failed') {
               stopPolling()
+              connectingRef.current = false
               setShowFallback(false)
               onError(state.error ?? 'Authorization failed')
             } else if (Date.now() - startedAtRef.current > 15_000) {
@@ -105,12 +114,14 @@ function ConnectFlow({ onDone, onError }: { onDone: () => void; onError: (msg: s
       }, 2000)
     } catch (err) {
       windowRef.current?.close()
+      connectingRef.current = false
       onError(err instanceof Error ? err.message : String(err))
     }
   }
 
   const onCancel = async (): Promise<void> => {
     stopPolling()
+    connectingRef.current = false
     setShowFallback(false)
     setCallbackUrl('')
     try {
@@ -237,14 +248,14 @@ export function Cloud() {
     }
   }
 
-  const onUpdateConfig = async (
-    field: 'syncMode' | 'syncFrequency',
-    value: CloudSyncMode | CloudSyncFrequency
-  ): Promise<void> => {
+  const onUpdateConfig = async (update: {
+    syncMode?: CloudSyncMode
+    syncFrequency?: CloudSyncFrequency
+  }): Promise<void> => {
     setBusy('config')
     setError(null)
     try {
-      await api.cloudConfig({ [field]: value })
+      await api.cloudConfig(update)
       cloud.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -361,7 +372,18 @@ export function Cloud() {
                     value={cloud.data.syncMode ?? 'manual'}
                     disabled={busy === 'config'}
                     onChange={(e) => {
-                      void onUpdateConfig('syncMode', e.target.value as CloudSyncMode)
+                      const syncMode = e.target.value as CloudSyncMode
+                      // Switching to scheduled with no prior frequency would
+                      // leave it null on the server and the schedule wouldn't
+                      // fire — default to daily in that case.
+                      const update: {
+                        syncMode: CloudSyncMode
+                        syncFrequency?: CloudSyncFrequency
+                      } = { syncMode }
+                      if (syncMode === 'scheduled' && !cloud.data?.syncFrequency) {
+                        update.syncFrequency = 'daily'
+                      }
+                      void onUpdateConfig(update)
                     }}
                   >
                     <option value="manual">Manual only</option>
@@ -380,7 +402,9 @@ export function Cloud() {
                       value={cloud.data.syncFrequency ?? 'daily'}
                       disabled={busy === 'config'}
                       onChange={(e) => {
-                        void onUpdateConfig('syncFrequency', e.target.value as CloudSyncFrequency)
+                        void onUpdateConfig({
+                          syncFrequency: e.target.value as CloudSyncFrequency
+                        })
                       }}
                     >
                       <option value="daily">Daily</option>
