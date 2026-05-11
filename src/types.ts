@@ -13,7 +13,7 @@ export type BackupServerAPI = ServerAPI
 //   - src/types.ts
 //   - src/updates/types.ts
 //
-// Last synced against signalk-container: v0.1.6
+// Last synced against signalk-container: v1.6.0 (VolumeSpec + onVolumeIssue)
 
 export type ContainerState = 'running' | 'stopped' | 'missing' | 'no-runtime'
 

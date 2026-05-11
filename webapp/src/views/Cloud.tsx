@@ -223,6 +223,11 @@ export function Cloud() {
     null
   )
   const [confirmDisconnect, setConfirmDisconnect] = useState(false)
+  // The dropdown reflects user intent immediately so picking "Local"
+  // from the gdrive view surfaces the configure form. Server provider
+  // doesn't actually flip until configure succeeds.
+  const [pendingProvider, setPendingProvider] = useState<CloudSyncProvider | null>(null)
+  const activeProvider: CloudSyncProvider = pendingProvider ?? cloud.data?.provider ?? 'gdrive'
 
   /**
    * Switch the active provider. For gdrive ↔ local, this just rewrites
@@ -238,6 +243,7 @@ export function Cloud() {
     setError(null)
     try {
       await api.localDisconnect()
+      setPendingProvider(null)
       cloud.refresh()
       local.refresh()
     } catch (err) {
@@ -350,16 +356,19 @@ export function Cloud() {
                 <Input
                   id="provider-select"
                   type="select"
-                  value={cloud.data.provider}
+                  value={activeProvider}
                   disabled={busy !== null}
                   onChange={(e) => {
                     const next = e.target.value as CloudSyncProvider
-                    if (next === cloud.data?.provider) return
+                    if (next === activeProvider) return
                     if (next === 'gdrive') {
                       void switchProviderToGdrive()
+                    } else {
+                      // Surface the LocalConfigureForm immediately. Server
+                      // provider only flips once the user picks a path and
+                      // /local/configure succeeds.
+                      setPendingProvider('local')
                     }
-                    // Switching to 'local' is driven by the LocalConfigureForm
-                    // below — the user has to pick a path before we flip.
                   }}
                 >
                   <option value="gdrive">Google Drive</option>
@@ -367,7 +376,7 @@ export function Cloud() {
                 </Input>
               </FormGroup>
 
-              {cloud.data.provider === 'gdrive' && (
+              {activeProvider === 'gdrive' && (
                 <>
                   {cloud.data.email && (
                     <p className="text-muted small mb-2">Account: {cloud.data.email}</p>
@@ -420,7 +429,7 @@ export function Cloud() {
                 </>
               )}
 
-              {cloud.data.provider === 'local' && (
+              {activeProvider === 'local' && (
                 <>
                   {local.data?.connected ? (
                     <>
@@ -448,6 +457,7 @@ export function Cloud() {
                       )}
                       <LocalConfigureForm
                         onConfigured={() => {
+                          setPendingProvider(null)
                           cloud.refresh()
                           local.refresh()
                           setSuccess('Local destination configured')

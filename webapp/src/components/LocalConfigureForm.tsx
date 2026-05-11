@@ -38,9 +38,19 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
     try {
       const { candidates } = await api.localDiscover()
       setCandidates(candidates)
+
+      // If the user had picked a path that's no longer in the discovery
+      // list (drive unplugged, mount removed), drop the stale selection
+      // so the dropdown doesn't keep showing it as "—" or letting them
+      // submit a vanished path.
+      const stillPresent = selected && candidates.some((c) => c.containerPath === selected)
+      if (selected && !stillPresent) {
+        setSelected('')
+      }
+
       // Auto-select the largest free-bytes candidate if the user hasn't
-      // chosen one yet — saves one click in the common single-USB case.
-      if (!selected && candidates.length > 0) {
+      // picked one — saves a click in the common single-USB case.
+      if ((!selected || !stillPresent) && candidates.length > 0) {
         const [best] = [...candidates].sort((a, b) => (b.freeBytes ?? 0) - (a.freeBytes ?? 0))
         if (best) setSelected(best.containerPath)
       }
