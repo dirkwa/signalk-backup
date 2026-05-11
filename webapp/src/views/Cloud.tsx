@@ -362,7 +362,18 @@ export function Cloud() {
                     const next = e.target.value as CloudSyncProvider
                     if (next === activeProvider) return
                     if (next === 'gdrive') {
-                      void switchProviderToGdrive()
+                      // Two cases land here:
+                      //   1. server provider is local → really switch.
+                      //   2. server provider is already gdrive and the user
+                      //      is just cancelling a pending local selection
+                      //      (they picked "Local" then changed their mind).
+                      //      Calling /local/disconnect in case 2 would clobber
+                      //      lastSync on the existing gdrive config — avoid it.
+                      if (cloud.data?.provider === 'gdrive') {
+                        setPendingProvider(null)
+                      } else {
+                        void switchProviderToGdrive()
+                      }
                     } else {
                       // Surface the LocalConfigureForm immediately. Server
                       // provider only flips once the user picks a path and
@@ -431,6 +442,11 @@ export function Cloud() {
 
               {activeProvider === 'local' && (
                 <>
+                  {local.error && (
+                    <Alert color="danger" className="mb-2">
+                      Failed to read local destination status: {local.error}
+                    </Alert>
+                  )}
                   {local.data?.connected ? (
                     <>
                       <p className="text-muted small mb-2">
