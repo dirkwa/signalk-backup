@@ -87,10 +87,7 @@ export function registerProxy(router: IRouter, opts: ProxyOptions): void {
         parsedBody !== undefined && parsedBody !== null && typeof parsedBody === 'object'
       if (hasParsedBody) {
         init.body = JSON.stringify(parsedBody)
-        // Fix Content-Type header which we stripped (lowercased: never in
-        // hop-by-hop, but the raw header from the browser may be missing
-        // if the original request was empty-body). Set it explicitly so
-        // upstream routes accept it.
+        // Force application/json — the browser may not have sent it.
         headers.set('content-type', 'application/json')
       } else {
         init.body = req

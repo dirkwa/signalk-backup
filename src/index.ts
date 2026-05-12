@@ -147,8 +147,7 @@ export default function (app: BackupServerAPI): Plugin {
       DATA_DIR: `${SK_MOUNT}/plugin-config-data/${PLUGIN_ID}`,
       SIGNALK_DATA_PATH: SK_MOUNT,
       SIGNALK_VERSION: getSignalKVersion(app),
-      // LOG_LEVEL deliberately not set — defaults to "info" inside the
-      // container. Power users override via signalk-container's
+      // Hardcoded to "info" — power users override via signalk-container's
       // containerOverrides.signalk-backup-server.env.LOG_LEVEL.
       LOG_LEVEL: 'info'
     },
