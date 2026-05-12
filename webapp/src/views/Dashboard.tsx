@@ -1,5 +1,12 @@
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Col, Row, Spinner } from 'reactstrap'
-import { api, formatDate, type PluginStatus, type SchedulerStatus } from '../api'
+import {
+  api,
+  formatBytes,
+  formatDate,
+  type PluginStatus,
+  type RepositoryStats,
+  type SchedulerStatus
+} from '../api'
 import { useApi } from '../useApi'
 
 function StatusPill({ status }: { status: PluginStatus | null }) {
@@ -8,6 +15,29 @@ function StatusPill({ status }: { status: PluginStatus | null }) {
     return <Badge color="warning">Not ready</Badge>
   }
   return <Badge color="success">Ready</Badge>
+}
+
+function RepoStorage({ stats }: { stats: RepositoryStats }) {
+  const ratio = stats.totalSize > 0 ? stats.originalSize / stats.totalSize : 0
+  return (
+    <Row className="g-2">
+      <Col xs={6}>
+        <small className="text-muted d-block">On disk</small>
+        <div>{formatBytes(stats.totalSize)}</div>
+      </Col>
+      <Col xs={6}>
+        <small className="text-muted d-block">Logical</small>
+        <div>{formatBytes(stats.originalSize)}</div>
+      </Col>
+      <Col xs={12} className="mt-2">
+        <small className="text-muted d-block">
+          {ratio >= 1.1
+            ? `${ratio.toFixed(1)}× dedup (${formatBytes(stats.dedupSavings)} saved)`
+            : 'No significant dedup yet'}
+        </small>
+      </Col>
+    </Row>
+  )
 }
 
 function SchedulerCounts({ scheduler }: { scheduler: SchedulerStatus }) {
@@ -37,11 +67,13 @@ export function Dashboard() {
   const status = useApi(() => api.pluginStatus(), { intervalMs: 5000 })
   const scheduler = useApi(() => api.scheduler(), { intervalMs: 15000 })
   const backups = useApi(() => api.listBackups(), { intervalMs: 30000 })
+  const repo = useApi(() => api.repository(), { intervalMs: 60000 })
 
   const refreshAll = (): void => {
     status.refresh()
     scheduler.refresh()
     backups.refresh()
+    repo.refresh()
   }
 
   return (
@@ -53,7 +85,7 @@ export function Dashboard() {
           outline
           size="sm"
           onClick={refreshAll}
-          disabled={status.loading || scheduler.loading || backups.loading}
+          disabled={status.loading || scheduler.loading || backups.loading || repo.loading}
         >
           Refresh
         </Button>
@@ -129,6 +161,25 @@ export function Dashboard() {
                   </Row>
                   <SchedulerCounts scheduler={scheduler.data} />
                 </>
+              ) : null}
+            </CardBody>
+          </Card>
+        </Col>
+
+        <Col xs={12} md={6}>
+          <Card className="mb-3">
+            <CardHeader>
+              <strong>Local repository</strong>
+            </CardHeader>
+            <CardBody>
+              {repo.loading && !repo.data ? (
+                <Spinner size="sm" />
+              ) : repo.error ? (
+                <Alert color="danger" className="mb-0">
+                  {repo.error}
+                </Alert>
+              ) : repo.data ? (
+                <RepoStorage stats={repo.data} />
               ) : null}
             </CardBody>
           </Card>

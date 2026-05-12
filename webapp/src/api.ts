@@ -178,6 +178,19 @@ export interface DataDirEntry {
   type?: 'dir' | 'history'
 }
 
+export interface RepositoryStats {
+  /** Actual bytes on disk for the local kopia repository. */
+  totalSize: number
+  /** Sum of snapshot logical (pre-dedup) sizes. */
+  originalSize: number
+  snapshotCount: number
+  /** originalSize - totalSize, clamped at 0. */
+  dedupSavings: number
+  /** Reserved; server currently returns 0. */
+  compressionRatio: number
+  status: string
+}
+
 export interface PluginDataDirEntry {
   name: string
   size: number
@@ -249,6 +262,8 @@ export const api = {
   listBackups: () => request<BackupsResponse>('/backups'),
 
   scheduler: () => request<SchedulerStatus>('/backups/scheduler'),
+
+  repository: () => request<RepositoryStats>('/backups/repository'),
 
   createBackup: (description?: string) =>
     request<BackupMetadata>('/backups', {
