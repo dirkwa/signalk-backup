@@ -178,10 +178,7 @@ export default function (app: BackupServerAPI): Plugin {
 
     schema: ConfigSchema,
 
-    // SignalK's admin form is react-jsonschema-form, which reads
-    // hide-field directives from a sibling `uiSchema` object, not from
-    // inline ui:widget on the schema itself. Hide databaseExport here
-    // — it's managed via the webapp's Database export card.
+    // RJSF reads hide-field directives from a sibling uiSchema, not the JSON schema.
     uiSchema: {
       databaseExport: { 'ui:widget': 'hidden' }
     },

@@ -30,14 +30,8 @@ export const ConfigSchema = Type.Object({
       'Used only when managedContainer is disabled. e.g. http://192.168.1.50:3010. ' +
       'Leave blank when managing the container.'
   }),
-  /**
-   * Database-export config. Hidden from the SignalK Admin UI form via
-   * the plugin's `uiSchema` (see `src/index.ts` plugin export) —
-   * managed instead through the webapp's Settings → Database export
-   * card.
-   * Field still has to exist in the schema or savePluginOptions would
-   * drop the value when round-tripping through SignalK's store.
-   */
+  // Must exist in the schema so savePluginOptions round-trips it; the
+  // form hides it via uiSchema in src/index.ts (webapp owns the UI).
   databaseExport: Type.Object(
     {
       questdb: Type.Boolean({ default: false }),
