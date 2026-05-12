@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Badge,
@@ -705,6 +705,199 @@ function DbExportCard() {
 }
 
 // ---------------------------------------------------------------------------
+// Retention card
+// ---------------------------------------------------------------------------
+//
+// Controls how many of each scheduled-backup tier kopia keeps. Manual
+// backups are deliberately absent — never auto-pruned, because the
+// user explicitly created them. The server-side enforcement runs after
+// every successful scheduled backup; lowering a number takes effect
+// at the next scheduled run, not retroactively.
+function RetentionCard() {
+  const cfg = useApi(() => api.retention(), { intervalMs: 60_000 })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+
+  // Local mirror so each input edits freely without thrashing the server.
+  type RetentionDraft = { hourly: string; daily: string; weekly: string; startup: string }
+  const [draft, setDraft] = useState<RetentionDraft>({
+    hourly: '',
+    daily: '',
+    weekly: '',
+    startup: ''
+  })
+
+  // Snapshot of the canonical server values the draft was last synced
+  // from. Lets the poll effect tell "user has unsaved edits" (draft
+  // diverges from snapshot) from "user hasn't touched the form since
+  // last sync" (draft equals snapshot).
+  const [serverSnapshot, setServerSnapshot] = useState<RetentionDraft>({
+    hourly: '',
+    daily: '',
+    weekly: '',
+    startup: ''
+  })
+
+  // Refs mirror the latest state so the poll effect (deps: [cfg.data])
+  // reads current values, not the stale closure from the render where
+  // the effect was wired up. Without these, the comparison below would
+  // be against whatever draft/snapshot existed at the previous effect
+  // run, not the latest user edits.
+  const draftRef = useRef(draft)
+  const snapshotRef = useRef(serverSnapshot)
+  useEffect(() => {
+    draftRef.current = draft
+  }, [draft])
+  useEffect(() => {
+    snapshotRef.current = serverSnapshot
+  }, [serverSnapshot])
+
+  useEffect(() => {
+    if (!cfg.data) return
+    const canonical: RetentionDraft = {
+      hourly: String(cfg.data.hourly),
+      daily: String(cfg.data.daily),
+      weekly: String(cfg.data.weekly),
+      startup: String(cfg.data.startup)
+    }
+    const currentDraft = draftRef.current
+    const currentSnapshot = snapshotRef.current
+    // Skip sync when the user has unsaved edits — preserve their input.
+    // First-load drafts are all '' === serverSnapshot's '' so the
+    // empty-string check covers it.
+    const draftIsClean =
+      currentDraft.hourly === currentSnapshot.hourly &&
+      currentDraft.daily === currentSnapshot.daily &&
+      currentDraft.weekly === currentSnapshot.weekly &&
+      currentDraft.startup === currentSnapshot.startup
+    if (draftIsClean) {
+      setDraft(canonical)
+    }
+    setServerSnapshot(canonical)
+  }, [cfg.data])
+
+  const onSave = async (): Promise<void> => {
+    // Clear previous feedback up front — otherwise a prior success
+    // alert sticks around even if this attempt fails validation.
+    setError(null)
+    setSuccess(null)
+
+    // Strict integer parse — parseInt would silently accept "1.9" → 1
+    // or "12abc" → 12, both wrong here. Match digits-only first, then
+    // bounds-check the result.
+    const INT_RE = /^\d+$/
+    const fields = ['hourly', 'daily', 'weekly', 'startup'] as const
+    const parsed = {} as Record<(typeof fields)[number], number>
+    for (const k of fields) {
+      const raw = draft[k].trim()
+      if (!INT_RE.test(raw)) {
+        setError(`${k} must be a whole number between 1 and 365`)
+        return
+      }
+      const v = Number(raw)
+      if (v < 1 || v > 365) {
+        setError(`${k} must be a whole number between 1 and 365`)
+        return
+      }
+      parsed[k] = v
+    }
+    setBusy(true)
+    try {
+      await api.setRetention(parsed)
+      cfg.refresh()
+      setSuccess('Retention policy saved')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const dirty =
+    cfg.data !== null &&
+    (String(cfg.data.hourly) !== draft.hourly ||
+      String(cfg.data.daily) !== draft.daily ||
+      String(cfg.data.weekly) !== draft.weekly ||
+      String(cfg.data.startup) !== draft.startup)
+
+  const tiers: { key: 'hourly' | 'daily' | 'weekly' | 'startup'; label: string; help: string }[] = [
+    { key: 'hourly', label: 'Hourly', help: '24 = one full day at 1-per-hour' },
+    { key: 'daily', label: 'Daily', help: '7 = one full week at 1-per-day' },
+    { key: 'weekly', label: 'Weekly', help: '4 = roughly one month' },
+    { key: 'startup', label: 'On startup', help: 'Created when SignalK boots after >24h offline' }
+  ]
+
+  return (
+    <Card className="mb-3">
+      <CardHeader>
+        <strong>Retention</strong>
+      </CardHeader>
+      <CardBody>
+        {cfg.loading && !cfg.data ? (
+          <Spinner size="sm" />
+        ) : cfg.error ? (
+          <Alert color="danger" className="mb-0">
+            {cfg.error}
+          </Alert>
+        ) : cfg.data ? (
+          <>
+            <p className="text-muted small mb-3">
+              How many backups of each scheduled tier to keep. Older ones get pruned after the next
+              scheduled backup. Manual backups are never auto-pruned.
+            </p>
+
+            <Form
+              onSubmit={(e) => {
+                e.preventDefault()
+                void onSave()
+              }}
+            >
+              {tiers.map((t) => (
+                <FormGroup key={t.key} className="mb-2">
+                  <Label for={`retention-${t.key}`}>{t.label}</Label>
+                  <div className="d-flex gap-2 align-items-center">
+                    <Input
+                      id={`retention-${t.key}`}
+                      type="number"
+                      min={1}
+                      max={365}
+                      step={1}
+                      value={draft[t.key]}
+                      disabled={busy}
+                      onChange={(e) => {
+                        setDraft((d) => ({ ...d, [t.key]: e.target.value }))
+                      }}
+                      style={{ maxWidth: '8em' }}
+                    />
+                    <small className="text-muted">{t.help}</small>
+                  </div>
+                </FormGroup>
+              ))}
+
+              <Button color="primary" type="submit" disabled={busy || !dirty} className="mt-2">
+                {busy ? <Spinner size="sm" /> : 'Save retention policy'}
+              </Button>
+            </Form>
+
+            {error && (
+              <Alert color="danger" className="mt-3 mb-0">
+                {error}
+              </Alert>
+            )}
+            {success && (
+              <Alert color="success" className="mt-3 mb-0">
+                {success}
+              </Alert>
+            )}
+          </>
+        ) : null}
+      </CardBody>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 export function Settings() {
@@ -712,6 +905,7 @@ export function Settings() {
     <>
       <h2 className="mb-3">Settings</h2>
       <SchedulerCard />
+      <RetentionCard />
       <ExclusionsCard />
       <DbExportCard />
       <PasswordCard />
