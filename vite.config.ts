@@ -2,8 +2,15 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
 
 const here = dirname(fileURLToPath(import.meta.url))
+
+// Inline the plugin's own version so the webapp header can show it
+// without a settings/health roundtrip.
+const pkgVersion = (
+  JSON.parse(readFileSync(resolve(here, 'package.json'), 'utf-8')) as { version: string }
+).version
 
 // SignalK mounts the built output at /signalk-backup/ (per the
 // webapps.ts loader, which uses package name + auto-detects public/).
@@ -11,6 +18,9 @@ const here = dirname(fileURLToPath(import.meta.url))
 // correctly when served behind it.
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __PLUGIN_VERSION__: JSON.stringify(pkgVersion)
+  },
   base: '/signalk-backup/',
   root: resolve(here, 'webapp'),
   build: {

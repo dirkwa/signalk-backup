@@ -28,7 +28,7 @@
   ],
   "signalk": {
     "displayName": "Backup",
-    "appIcon": "assets/icon.png",
+    "appIcon": "icon.svg",
     "webapp": {
       "name": "Backup",
       "description": "Scheduled deduplicated backups to local storage and Google Drive"
