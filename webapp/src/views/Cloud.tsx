@@ -45,7 +45,7 @@ function StatusBadges({ status }: { status: CloudStatus }) {
     <div className="mb-2 d-flex gap-2 flex-wrap">
       <Badge color={status.connected ? 'success' : 'secondary'}>
         {status.connected
-          ? `${providerLabel(status.provider)} connected`
+          ? `Active: ${providerLabel(status.provider)}`
           : `${providerLabel(status.provider)} not configured`}
       </Badge>
       {status.syncing && <Badge color="info">Syncing</Badge>}
