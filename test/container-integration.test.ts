@@ -19,20 +19,19 @@ describe('SCHEMA_DEFAULTS merge', () => {
     const merged: Config = { ...SCHEMA_DEFAULTS, ...config }
     expect(merged.managedContainer).toBe(true)
     expect(merged.imageTag).toBe('latest')
-    expect(merged.logLevel).toBe('info')
     expect(merged.externalUrl).toBe('')
+    expect(merged.databaseExport.questdb).toBe(false)
+    expect(merged.databaseExport.intervalMinutes).toBe(60)
   })
 
   it('user-supplied fields override defaults', () => {
     const config: Partial<Config> = {
       managedContainer: false,
-      externalUrl: 'http://server:3001',
-      logLevel: 'debug'
+      externalUrl: 'http://server:3001'
     }
     const merged: Config = { ...SCHEMA_DEFAULTS, ...config }
     expect(merged.managedContainer).toBe(false)
     expect(merged.externalUrl).toBe('http://server:3001')
-    expect(merged.logLevel).toBe('debug')
     expect(merged.imageTag).toBe('latest') // unchanged from defaults
   })
 
@@ -41,6 +40,6 @@ describe('SCHEMA_DEFAULTS merge', () => {
     expect(typeof merged.managedContainer).toBe('boolean')
     expect(typeof merged.imageTag).toBe('string')
     expect(typeof merged.externalUrl).toBe('string')
-    expect(typeof merged.logLevel).toBe('string')
+    expect(typeof merged.databaseExport).toBe('object')
   })
 })

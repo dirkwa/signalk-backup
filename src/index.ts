@@ -291,11 +291,9 @@ export default function (app: BackupServerAPI): Plugin {
           app.setPluginStatus('Recreating signalk-backup-server container...')
           await containers.remove(CONTAINER_NAME)
           try {
-            await containers.ensureRunning(
-              CONTAINER_NAME,
-              buildContainerConfig(tag),
-              { onVolumeIssue }
-            )
+            await containers.ensureRunning(CONTAINER_NAME, buildContainerConfig(tag), {
+              onVolumeIssue
+            })
           } catch (recreateErr) {
             const msg = `Container removed but recreation failed: ${errMsg(recreateErr)}. Click Update again to retry.`
             app.setPluginError(msg)
@@ -323,6 +321,82 @@ export default function (app: BackupServerAPI): Plugin {
           app.setPluginError(`Update failed: ${errMsg(err)}`)
           res.status(500).json({ error: errMsg(err) })
         }
+      })
+
+      // Database export config — owned by the plugin (the plugin runs
+      // the export interval timer; the backup-server just consumes the
+      // resulting Parquet files when it next snapshots). Webapp Settings
+      // → Database export card calls these.
+      router.get('/api/db-export/config', (_req: Request, res: Response) => {
+        const cfg = currentSettings?.databaseExport ?? SCHEMA_DEFAULTS.databaseExport
+        res.json({ success: true, data: cfg, timestamp: new Date().toISOString() })
+      })
+
+      router.post('/api/db-export/config', async (req: Request, res: Response) => {
+        const body = (req.body ?? {}) as { questdb?: unknown; intervalMinutes?: unknown }
+
+        const questdb = typeof body.questdb === 'boolean' ? body.questdb : undefined
+        const intervalMinutes =
+          typeof body.intervalMinutes === 'number' && Number.isFinite(body.intervalMinutes)
+            ? Math.round(body.intervalMinutes)
+            : undefined
+
+        if (questdb === undefined && intervalMinutes === undefined) {
+          res.status(400).json({
+            success: false,
+            error: {
+              code: 'INVALID_INPUT',
+              message: 'Provide questdb (boolean) and/or intervalMinutes (number).'
+            },
+            timestamp: new Date().toISOString()
+          })
+          return
+        }
+
+        if (intervalMinutes !== undefined && (intervalMinutes < 5 || intervalMinutes > 1440)) {
+          res.status(400).json({
+            success: false,
+            error: {
+              code: 'INVALID_INPUT',
+              message: 'intervalMinutes must be between 5 and 1440.'
+            },
+            timestamp: new Date().toISOString()
+          })
+          return
+        }
+
+        if (!currentSettings) {
+          res.status(503).json({
+            success: false,
+            error: { code: 'NOT_READY', message: 'Plugin settings not loaded yet.' },
+            timestamp: new Date().toISOString()
+          })
+          return
+        }
+
+        const next = {
+          questdb: questdb ?? currentSettings.databaseExport.questdb,
+          intervalMinutes: intervalMinutes ?? currentSettings.databaseExport.intervalMinutes
+        }
+        currentSettings.databaseExport = next
+
+        // Persist via SignalK's plugin-options store so a server restart
+        // round-trips the value. The store call is fire-and-callback;
+        // wrap in a promise so we can wait before responding.
+        await new Promise<void>((resolve) => {
+          app.savePluginOptions({ ...currentSettings }, (err: NodeJS.ErrnoException | null) => {
+            if (err) {
+              app.error(`Failed to persist database-export config: ${errMsg(err)}`)
+            }
+            resolve()
+          })
+        })
+
+        // Restart the timer so the new interval/enabled state takes
+        // effect immediately, without waiting for the next plugin start.
+        startDbExportTimer()
+
+        res.json({ success: true, data: next, timestamp: new Date().toISOString() })
       })
 
       // Discovery runs here, not in the container, so multicast doesn't
@@ -412,11 +486,9 @@ export default function (app: BackupServerAPI): Plugin {
 
     try {
       app.setPluginStatus(`Starting ${BACKUP_IMAGE}:${settings.imageTag}...`)
-      await containers.ensureRunning(
-        CONTAINER_NAME,
-        buildContainerConfig(settings.imageTag),
-        { onVolumeIssue }
-      )
+      await containers.ensureRunning(CONTAINER_NAME, buildContainerConfig(settings.imageTag), {
+        onVolumeIssue
+      })
 
       // Register with the central update service so users see "update available"
       // badges in the signalk-container config panel without us writing custom
