@@ -118,7 +118,7 @@ export default function (app: BackupServerAPI): Plugin {
   let dbExportTimer: NodeJS.Timeout | null = null
   let dbExportInFlight = false
 
-  const buildContainerConfig = (tag: string, logLevel: string): ContainerConfig => ({
+  const buildContainerConfig = (tag: string): ContainerConfig => ({
     image: BACKUP_IMAGE,
     tag,
     // signalkConfigRootMount mounts the entire SignalK config root
@@ -147,7 +147,10 @@ export default function (app: BackupServerAPI): Plugin {
       DATA_DIR: `${SK_MOUNT}/plugin-config-data/${PLUGIN_ID}`,
       SIGNALK_DATA_PATH: SK_MOUNT,
       SIGNALK_VERSION: getSignalKVersion(app),
-      LOG_LEVEL: logLevel
+      // LOG_LEVEL deliberately not set — defaults to "info" inside the
+      // container. Power users override via signalk-container's
+      // containerOverrides.signalk-backup-server.env.LOG_LEVEL.
+      LOG_LEVEL: 'info'
     },
     resources: DEFAULT_RESOURCES,
     restart: 'unless-stopped'
@@ -290,7 +293,7 @@ export default function (app: BackupServerAPI): Plugin {
           try {
             await containers.ensureRunning(
               CONTAINER_NAME,
-              buildContainerConfig(tag, currentSettings?.logLevel ?? 'info'),
+              buildContainerConfig(tag),
               { onVolumeIssue }
             )
           } catch (recreateErr) {
@@ -411,7 +414,7 @@ export default function (app: BackupServerAPI): Plugin {
       app.setPluginStatus(`Starting ${BACKUP_IMAGE}:${settings.imageTag}...`)
       await containers.ensureRunning(
         CONTAINER_NAME,
-        buildContainerConfig(settings.imageTag, settings.logLevel),
+        buildContainerConfig(settings.imageTag),
         { onVolumeIssue }
       )
 
