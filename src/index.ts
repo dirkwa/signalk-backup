@@ -322,12 +322,8 @@ export default function (app: BackupServerAPI): Plugin {
         }
       })
 
-      // mDNS-based SMB discovery runs in the SignalK process (not the
-      // backup-server container) so multicast doesn't have to traverse
-      // the container's network. Returns whatever responds on
-      // _smb._tcp.local within the timeout. UI uses this to populate a
-      // host-picker dropdown; manual host entry is the always-available
-      // fallback when nothing responds.
+      // Discovery runs here, not in the container, so multicast doesn't
+      // have to traverse the backup-server's network namespace.
       router.get('/api/cloud/smb/discover', async (_req: Request, res: Response) => {
         try {
           const hosts = await discoverSmbHosts(2000)

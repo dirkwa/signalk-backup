@@ -1,12 +1,5 @@
-// mDNS-based SMB host discovery on the host network — runs in the
-// SignalK process (plugin-side). Putting it here instead of in the
-// backup-server container means the user's SignalK network mode is the
-// only thing that determines whether multicast works.
-//
-// Wraps Bonjour's `_smb._tcp.local` browser. Returns whatever responds
-// within `timeoutMs`; an empty list isn't an error (multicast may be
-// blocked, no SMB devices on the LAN, etc) — the UI surfaces a manual
-// host field as the always-available fallback.
+// Lives plugin-side (not in the container) so the SignalK process's
+// network is what determines whether multicast reaches the LAN.
 
 import { Bonjour } from 'bonjour-service'
 

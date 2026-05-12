@@ -515,9 +515,9 @@ export function Cloud() {
                       <p className="text-muted small mb-2">
                         Backing up to{' '}
                         <code>
-                          \\{smb.data.host}\{smb.data.share}
+                          \\{smb.data.host ?? '?'}\{smb.data.share ?? '?'}
                         </code>{' '}
-                        as <code>{smb.data.user}</code>
+                        as <code>{smb.data.user ?? '?'}</code>
                       </p>
                       <Button
                         color="danger"

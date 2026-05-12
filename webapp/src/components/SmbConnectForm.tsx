@@ -38,9 +38,11 @@ export function SmbConnectForm({ onConnected, onError }: Props) {
       const { hosts } = await api.smbDiscover()
       setHosts(hosts)
     } catch (err) {
-      // Swallow — discovery is opportunistic. The manual fields still
-      // work even if the route fails.
-      onError(err instanceof Error ? err.message : String(err))
+      // Opportunistic — manual host entry still works. Don't fire the
+      // top-level onError (which surfaces a global red Alert) for what
+      // the user didn't explicitly ask for.
+      // eslint-disable-next-line no-console
+      console.debug('SMB mDNS discovery failed:', err)
       setHosts([])
     } finally {
       setScanning(false)
