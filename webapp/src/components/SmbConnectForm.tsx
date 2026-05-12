@@ -17,9 +17,9 @@ interface Props {
  * SignalK process so multicast doesn't have to cross the backup-server
  * container's network.
  *
- * Credentials are stored in clear text in rclone.conf (matches what
- * `rclone config` writes by default). The warning surfaces this to
- * the user.
+ * Credentials are obfuscated by `rclone obscure` on the server before
+ * being written to rclone.conf. Obfuscation is reversible — the warning
+ * surfaces that to the user.
  */
 export function SmbConnectForm({ onConnected, onError }: Props) {
   const [hosts, setHosts] = useState<SmbDiscoveredHost[] | null>(null)
@@ -56,7 +56,7 @@ export function SmbConnectForm({ onConnected, onError }: Props) {
 
   const submit = async (e?: React.SyntheticEvent): Promise<void> => {
     e?.preventDefault()
-    if (!host.trim() || !share.trim() || !user.trim() || !password) return
+    if (!host.trim() || !share.trim()) return
     setSubmitting(true)
     try {
       await api.smbConnect({
@@ -80,9 +80,9 @@ export function SmbConnectForm({ onConnected, onError }: Props) {
   return (
     <form onSubmit={(e) => void submit(e)}>
       <Alert color="warning" className="mb-3 small">
-        <strong>Heads up:</strong> SMB credentials are stored in plain text in rclone&apos;s config
-        file (mode 0o600, owner-only). Anyone with read access to the backup-server container can
-        see the password.
+        <strong>Heads up:</strong> SMB credentials are stored in rclone&apos;s obfuscated form (mode
+        0o600, owner-only). The obfuscation is reversible by anyone with read access to the
+        backup-server container — treat it as protection against casual reading, not as encryption.
       </Alert>
 
       <FormGroup>
@@ -153,7 +153,6 @@ export function SmbConnectForm({ onConnected, onError }: Props) {
           onChange={(e) => {
             setUser(e.target.value)
           }}
-          required
         />
       </FormGroup>
 
@@ -168,8 +167,10 @@ export function SmbConnectForm({ onConnected, onError }: Props) {
           onChange={(e) => {
             setPassword(e.target.value)
           }}
-          required
         />
+        <small className="text-muted">
+          Leave Username and Password empty for guest / anonymous shares.
+        </small>
       </FormGroup>
 
       <FormGroup>
