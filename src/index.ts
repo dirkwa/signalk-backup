@@ -322,10 +322,8 @@ export default function (app: BackupServerAPI): Plugin {
         }
       })
 
-      // Database export config — owned by the plugin (the plugin runs
-      // the export interval timer; the backup-server just consumes the
-      // resulting Parquet files when it next snapshots). Webapp Settings
-      // → Database export card calls these.
+      // Plugin owns the timer; backup-server only consumes the Parquet
+      // files when it next snapshots — so the config lives here, not there.
       router.get('/api/db-export/config', (_req: Request, res: Response) => {
         const cfg = currentSettings?.databaseExport ?? SCHEMA_DEFAULTS.databaseExport
         res.json({ success: true, data: cfg, timestamp: new Date().toISOString() })
@@ -379,17 +377,26 @@ export default function (app: BackupServerAPI): Plugin {
         }
         currentSettings.databaseExport = next
 
-        // Persist via SignalK's plugin-options store so a server restart
-        // round-trips the value. The store call is fire-and-callback;
-        // wrap in a promise so we can wait before responding.
-        await new Promise<void>((resolve) => {
-          app.savePluginOptions({ ...currentSettings }, (err: NodeJS.ErrnoException | null) => {
-            if (err) {
-              app.error(`Failed to persist database-export config: ${errMsg(err)}`)
-            }
-            resolve()
+        // Persist via SignalK's plugin-options store so the new value
+        // survives restart. Reject on failure so the route surfaces the
+        // problem to the user — silently logging would be a footgun
+        // (UI says "saved" then a restart wipes the change).
+        try {
+          await new Promise<void>((resolve, reject) => {
+            app.savePluginOptions({ ...currentSettings }, (err: NodeJS.ErrnoException | null) => {
+              if (err) reject(err)
+              else resolve()
+            })
           })
-        })
+        } catch (err) {
+          app.error(`Failed to persist database-export config: ${errMsg(err)}`)
+          res.status(500).json({
+            success: false,
+            error: { code: 'PERSIST_FAILED', message: errMsg(err) },
+            timestamp: new Date().toISOString()
+          })
+          return
+        }
 
         // Restart the timer so the new interval/enabled state takes
         // effect immediately, without waiting for the next plugin start.
