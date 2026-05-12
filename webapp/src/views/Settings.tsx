@@ -562,6 +562,149 @@ function PasswordCard() {
 }
 
 // ---------------------------------------------------------------------------
+// Database export card
+// ---------------------------------------------------------------------------
+//
+// QuestDB lives in the signalk-questdb container's data dir and is
+// excluded from the filesystem-level snapshot (its WAL would tear in
+// flight). Instead the plugin periodically writes a Parquet export of
+// each table to a side-by-side directory inside the SignalK config
+// root; the next backup-server snapshot then captures those files.
+// Toggle here whether the exporter runs, and how often.
+function DbExportCard() {
+  const cfg = useApi(() => api.dbExportConfig(), { intervalMs: 60_000 })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+
+  // Local mirror of the interval so the input can be edited freely
+  // without thrashing the server. Synced from server when cfg.data
+  // changes (e.g. after a successful save).
+  const [intervalDraft, setIntervalDraft] = useState<string>('')
+  useEffect(() => {
+    if (cfg.data) setIntervalDraft(String(cfg.data.intervalMinutes))
+  }, [cfg.data])
+
+  const onToggleQuestdb = async (next: boolean): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      await api.dbExportConfigSet({ questdb: next })
+      cfg.refresh()
+      setSuccess(next ? 'QuestDB export enabled' : 'QuestDB export disabled')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onSaveInterval = async (): Promise<void> => {
+    const parsed = parseInt(intervalDraft, 10)
+    if (!Number.isFinite(parsed) || parsed < 5 || parsed > 1440) {
+      setError('Interval must be between 5 and 1440 minutes.')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      await api.dbExportConfigSet({ intervalMinutes: parsed })
+      cfg.refresh()
+      setSuccess(`Export interval set to ${parsed} minutes`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const data = cfg.data
+  const intervalChanged = data ? String(data.intervalMinutes) !== intervalDraft : false
+
+  return (
+    <Card className="mb-3">
+      <CardHeader>
+        <strong>Database export</strong>
+      </CardHeader>
+      <CardBody>
+        {cfg.loading && !data ? (
+          <Spinner size="sm" />
+        ) : cfg.error ? (
+          <Alert color="danger" className="mb-0">
+            {cfg.error}
+          </Alert>
+        ) : data ? (
+          <>
+            <p className="text-muted small mb-3">
+              When enabled, the plugin periodically exports database tables to Parquet files inside
+              the SignalK config root. The next backup-server snapshot then captures them as part of
+              the regular backup. Filesystem-level database files (WAL etc.) are still excluded.
+            </p>
+
+            <FormGroup switch className="mb-3">
+              <Input
+                id="db-export-questdb"
+                type="switch"
+                role="switch"
+                checked={data.questdb}
+                disabled={busy}
+                onChange={(e) => void onToggleQuestdb(e.target.checked)}
+              />
+              <Label for="db-export-questdb" check>
+                Export QuestDB tables to backup
+              </Label>
+            </FormGroup>
+
+            <FormGroup>
+              <Label for="db-export-interval">Export interval (minutes)</Label>
+              <div className="d-flex gap-2">
+                <Input
+                  id="db-export-interval"
+                  type="number"
+                  min={5}
+                  max={1440}
+                  step={5}
+                  value={intervalDraft}
+                  disabled={busy}
+                  onChange={(e) => {
+                    setIntervalDraft(e.target.value)
+                  }}
+                  style={{ maxWidth: '12em' }}
+                />
+                <Button
+                  color="primary"
+                  disabled={busy || !intervalChanged}
+                  onClick={() => void onSaveInterval()}
+                >
+                  {busy ? <Spinner size="sm" /> : 'Save'}
+                </Button>
+              </div>
+              <small className="text-muted">
+                Default 60. Lower values keep DB data fresher in backups but write more often.
+                Effective freshness is bounded by max(this interval, the snapshot interval).
+              </small>
+            </FormGroup>
+
+            {error && (
+              <Alert color="danger" className="mt-2 mb-0">
+                {error}
+              </Alert>
+            )}
+            {success && (
+              <Alert color="success" className="mt-2 mb-0">
+                {success}
+              </Alert>
+            )}
+          </>
+        ) : null}
+      </CardBody>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 export function Settings() {
@@ -570,6 +713,7 @@ export function Settings() {
       <h2 className="mb-3">Settings</h2>
       <SchedulerCard />
       <ExclusionsCard />
+      <DbExportCard />
       <PasswordCard />
     </>
   )

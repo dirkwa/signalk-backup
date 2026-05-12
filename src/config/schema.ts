@@ -1,12 +1,14 @@
 import { Type, Static } from '@sinclair/typebox'
 
 /**
- * Schema for the SignalK Admin UI plugin config form.
+ * Schema for the SignalK Admin UI plugin config form. Only the
+ * per-deployment knobs the SignalK admin needs to set up — backup
+ * schedule, retention, cloud sync, exclusions, password, database
+ * export are all in the webapp's Settings view at /signalk-backup/.
  *
- * Most user-facing settings (schedule, retention, cloud sync, exclusions)
- * live inside the backup-server container's own UI — open it via the
- * "Open Backup Console" link from /plugins/signalk-backup/. The fields
- * below are only the per-deployment knobs the SignalK admin needs.
+ * For LOG_LEVEL: defaults to "info"; power users can override via
+ * signalk-container's per-container env override
+ * (containerOverrides.signalk-backup-server.env.LOG_LEVEL).
  */
 export const ConfigSchema = Type.Object({
   managedContainer: Type.Boolean({
@@ -28,46 +30,22 @@ export const ConfigSchema = Type.Object({
       'Used only when managedContainer is disabled. e.g. http://192.168.1.50:3010. ' +
       'Leave blank when managing the container.'
   }),
-  logLevel: Type.Union(
-    [
-      Type.Literal('trace'),
-      Type.Literal('debug'),
-      Type.Literal('info'),
-      Type.Literal('warn'),
-      Type.Literal('error'),
-      Type.Literal('fatal')
-    ],
-    {
-      default: 'info',
-      title: 'Log level',
-      description: 'Forwarded to the backup-server container as LOG_LEVEL.'
-    }
-  ),
+  /**
+   * Database-export config. NOT shown in the Admin UI form — managed
+   * via the webapp's Settings → Database export card. Persisted here
+   * so it round-trips through SignalK's plugin-options store. Field
+   * still has to exist in the schema or savePluginOptions would drop
+   * the value.
+   */
   databaseExport: Type.Object(
     {
-      questdb: Type.Boolean({
-        default: false,
-        title: 'Export QuestDB to backup',
-        description:
-          'When enabled, the plugin periodically writes QuestDB tables to Parquet files ' +
-          'inside the backup data dir. The next snapshot then captures them as part of ' +
-          'the regular backup. Filesystem-level QuestDB files are still excluded — only ' +
-          'the safe COPY-out exports travel.'
-      }),
-      intervalMinutes: Type.Number({
-        default: 60,
-        minimum: 5,
-        maximum: 1440,
-        title: 'Export interval (minutes)',
-        description:
-          'How often the plugin runs database exports. The freshness of DB data inside ' +
-          'a backup is bounded by max(this interval, the backup-server snapshot interval). ' +
-          'Default 60.'
-      })
+      questdb: Type.Boolean({ default: false }),
+      intervalMinutes: Type.Number({ default: 60, minimum: 5, maximum: 1440 })
     },
     {
       default: { questdb: false, intervalMinutes: 60 },
-      title: 'Database export'
+      // Hidden from the SignalK Admin UI form — webapp manages it.
+      'ui:widget': 'hidden'
     }
   )
 })
@@ -88,7 +66,6 @@ export const SCHEMA_DEFAULTS: Config = {
   managedContainer: true,
   imageTag: 'latest',
   externalUrl: '',
-  logLevel: 'info',
   databaseExport: {
     questdb: false,
     intervalMinutes: 60

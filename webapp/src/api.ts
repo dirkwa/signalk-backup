@@ -188,6 +188,13 @@ export interface PluginDataDirEntry {
   lockReason?: string
 }
 
+export interface DbExportConfig {
+  /** Whether the QuestDB exporter runs on the interval. */
+  questdb: boolean
+  /** Interval between exports in minutes (5 - 1440). */
+  intervalMinutes: number
+}
+
 export interface PasswordStatus {
   hasCustomPassword: boolean
   /** The current kopia password. Exposed to the user so it can be copied
@@ -326,6 +333,17 @@ export const api = {
     }),
   smbDisconnect: () =>
     request<{ disconnected: boolean }>('/cloud/smb/disconnect', { method: 'POST' }),
+
+  // Database export (plugin-side, not proxied to backup-server). The
+  // plugin runs the export interval timer; the backup-server just
+  // snapshots the resulting Parquet files when the next backup runs.
+  dbExportConfig: () => request<DbExportConfig>('/db-export/config'),
+  dbExportConfigSet: (next: Partial<DbExportConfig>) =>
+    request<DbExportConfig>('/db-export/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next)
+    }),
 
   cloudSync: () => request<{ started: boolean }>('/cloud/sync', { method: 'POST' }),
   cloudSyncCancel: () => request<{ cancelled: boolean }>('/cloud/sync/cancel', { method: 'POST' }),

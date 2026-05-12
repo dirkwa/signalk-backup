@@ -7,10 +7,19 @@ describe('config schema', () => {
     expect(Value.Check(ConfigSchema, SCHEMA_DEFAULTS)).toBe(true)
   })
 
-  it('rejects invalid log level', () => {
-    expect(Value.Check(ConfigSchema, { ...SCHEMA_DEFAULTS, logLevel: 'verbose' as never })).toBe(
-      false
-    )
+  it('rejects out-of-range databaseExport.intervalMinutes', () => {
+    expect(
+      Value.Check(ConfigSchema, {
+        ...SCHEMA_DEFAULTS,
+        databaseExport: { questdb: false, intervalMinutes: 1 }
+      })
+    ).toBe(false)
+    expect(
+      Value.Check(ConfigSchema, {
+        ...SCHEMA_DEFAULTS,
+        databaseExport: { questdb: false, intervalMinutes: 9999 }
+      })
+    ).toBe(false)
   })
 
   it('accepts a config with externalUrl set when managedContainer is false', () => {

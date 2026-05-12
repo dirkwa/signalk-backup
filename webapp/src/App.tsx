@@ -43,7 +43,11 @@ export function App() {
 
   return (
     <Container className="py-4">
-      <h1 className="mb-4">SignalK Backup</h1>
+      <div className="d-flex align-items-center mb-4">
+        <img src="/signalk-backup/icon.svg" alt="" width={40} height={40} className="me-3" />
+        <h1 className="mb-0">SignalK Backup</h1>
+        <small className="text-muted ms-3 align-self-end mb-2">v{__PLUGIN_VERSION__}</small>
+      </div>
 
       <Nav tabs className="mb-3">
         {ROUTES.map((r) => (

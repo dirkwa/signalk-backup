@@ -76,8 +76,23 @@ export function registerProxy(router: IRouter, opts: ProxyOptions): void {
       headers
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      init.body = req
-      init.duplex = 'half'
+      // SignalK's outer middleware registers express.json() globally, which
+      // consumes the request stream on JSON POSTs and stashes the parsed
+      // body on req.body. By the time we get here, piping `req` as the
+      // fetch body throws "Response body object should not be disturbed or
+      // locked". So: if Express already parsed it, re-serialize req.body
+      // instead of trying to re-read the consumed stream.
+      const parsedBody: unknown = (req as { body?: unknown }).body
+      const hasParsedBody =
+        parsedBody !== undefined && parsedBody !== null && typeof parsedBody === 'object'
+      if (hasParsedBody) {
+        init.body = JSON.stringify(parsedBody)
+        // Force application/json — the browser may not have sent it.
+        headers.set('content-type', 'application/json')
+      } else {
+        init.body = req
+        init.duplex = 'half'
+      }
     }
 
     let upstreamRes: Awaited<ReturnType<typeof fetch>>

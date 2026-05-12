@@ -2,9 +2,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <!--
     signalk-backup icon
-    A shield (backup, protection) over a SignalK-blue wave field with a
-    checkmark at center (snapshot completed). Two-tone, scales cleanly to
-    16px favicon size — kept simple geometry, no fine detail.
+    Rounded square (SignalK admin tile aesthetic) with a SignalK-blue
+    gradient, a white shield (backup, protection), and a green
+    checkmark (snapshot completed). Fills the whole viewBox so no
+    underlying tile background shows through.
   -->
   <defs>
     <linearGradient id="seaGrad" x1="0" x2="0" y1="0" y2="1">
@@ -17,13 +18,17 @@
     </linearGradient>
   </defs>
 
-  <!-- background disc -->
-  <circle cx="128" cy="128" r="120" fill="url(#seaGrad)"/>
+  <!-- The SignalK admin tile renders this with `bg-primary` (Bootstrap
+       blue) underneath. Without a backdrop the rounded-rect corners
+       show that blue. Paint a white square first, then the rounded
+       blue tile on top, so the corner cutouts read as white. -->
+  <rect x="0" y="0" width="256" height="256" fill="#ffffff"/>
+  <rect x="0" y="0" width="256" height="256" rx="36" ry="36" fill="url(#seaGrad)"/>
 
   <!-- waves -->
-  <path d="M 28 168 Q 64 152, 100 168 T 172 168 T 228 168 V 200 H 28 Z"
+  <path d="M 0 168 Q 40 152, 80 168 T 160 168 T 256 168 V 256 H 0 Z"
         fill="#ffffff" fill-opacity="0.18"/>
-  <path d="M 28 188 Q 64 174, 100 188 T 172 188 T 228 188 V 220 H 28 Z"
+  <path d="M 0 192 Q 40 178, 80 192 T 160 192 T 256 192 V 256 H 0 Z"
         fill="#ffffff" fill-opacity="0.12"/>
 
   <!-- shield body -->
