@@ -23,6 +23,7 @@ import {
 } from '../api'
 import { useApi } from '../useApi'
 import { LocalConfigureForm } from '../components/LocalConfigureForm'
+import { SmbConnectForm } from '../components/SmbConnectForm'
 
 function providerLabel(provider: CloudSyncProvider): string {
   switch (provider) {
@@ -30,11 +31,16 @@ function providerLabel(provider: CloudSyncProvider): string {
       return 'Drive'
     case 'local':
       return 'Local destination'
+    case 'smb':
+      return 'SMB share'
   }
 }
 
 function StatusBadges({ status }: { status: CloudStatus }) {
-  const isLocal = status.provider === 'local'
+  // Internet check is only meaningful for cloud-side rclone providers
+  // (gdrive). LAN-local SMB and pure local-filesystem don't depend on
+  // internet connectivity.
+  const skipsInternetCheck = status.provider === 'local' || status.provider === 'smb'
   return (
     <div className="mb-2 d-flex gap-2 flex-wrap">
       <Badge color={status.connected ? 'success' : 'secondary'}>
@@ -43,8 +49,9 @@ function StatusBadges({ status }: { status: CloudStatus }) {
           : `${providerLabel(status.provider)} not configured`}
       </Badge>
       {status.syncing && <Badge color="info">Syncing</Badge>}
-      {/* Internet check is only meaningful for rclone-backed providers (gdrive). */}
-      {!isLocal && status.internetAvailable === false && <Badge color="warning">Offline</Badge>}
+      {!skipsInternetCheck && status.internetAvailable === false && (
+        <Badge color="warning">Offline</Badge>
+      )}
     </div>
   )
 }
@@ -217,6 +224,7 @@ function ConnectFlow({ onDone, onError }: { onDone: () => void; onError: (msg: s
 export function Cloud() {
   const cloud = useApi(() => api.cloudStatus(), { intervalMs: 5000 })
   const local = useApi(() => api.localStatus(), { intervalMs: 5000 })
+  const smb = useApi(() => api.smbStatus(), { intervalMs: 5000 })
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [busy, setBusy] = useState<'sync' | 'cancel' | 'disconnect' | 'config' | 'switch' | null>(
@@ -230,22 +238,37 @@ export function Cloud() {
   const activeProvider: CloudSyncProvider = pendingProvider ?? cloud.data?.provider ?? 'gdrive'
 
   /**
-   * Switch the active provider. For gdrive ↔ local, this just rewrites
-   * settings.cloudSync.provider; the backend keeps prior config so
-   * switching back doesn't require re-authing or re-picking a path.
+   * Switch the active server-side provider back to gdrive.
    *
-   * Local → Gdrive flips immediately via /local/disconnect.
-   * Gdrive → Local opens the LocalConfigureForm; selection there flips
-   * provider via /local/configure (which sets provider='local').
+   * Dispatches based on the current server provider:
+   *   - local → /cloud/local/disconnect
+   *   - smb   → /cloud/smb/disconnect
+   *   - gdrive (already) → no-op (just clears pendingProvider)
+   *
+   * Both disconnect routes preserve syncMode/syncFrequency so switching
+   * destinations doesn't reset the schedule.
    */
   const switchProviderToGdrive = async (): Promise<void> => {
+    const serverProvider = cloud.data?.provider
+    if (serverProvider === 'gdrive' || !serverProvider) {
+      setPendingProvider(null)
+      return
+    }
     setBusy('switch')
     setError(null)
     try {
-      await api.localDisconnect()
+      switch (serverProvider) {
+        case 'local':
+          await api.localDisconnect()
+          break
+        case 'smb':
+          await api.smbDisconnect()
+          break
+      }
       setPendingProvider(null)
       cloud.refresh()
       local.refresh()
+      smb.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -362,28 +385,23 @@ export function Cloud() {
                     const next = e.target.value as CloudSyncProvider
                     if (next === activeProvider) return
                     if (next === 'gdrive') {
-                      // Two cases land here:
-                      //   1. server provider is local → really switch.
-                      //   2. server provider is already gdrive and the user
-                      //      is just cancelling a pending local selection
-                      //      (they picked "Local" then changed their mind).
-                      //      Calling /local/disconnect in case 2 would clobber
-                      //      lastSync on the existing gdrive config — avoid it.
-                      if (cloud.data?.provider === 'gdrive') {
-                        setPendingProvider(null)
-                      } else {
-                        void switchProviderToGdrive()
-                      }
+                      // switchProviderToGdrive() is a no-op when the
+                      // server is already gdrive — it just clears
+                      // pendingProvider — so "user cancelled a pending
+                      // local/smb selection" works without a special
+                      // case here.
+                      void switchProviderToGdrive()
                     } else {
-                      // Surface the LocalConfigureForm immediately. Server
-                      // provider only flips once the user picks a path and
-                      // /local/configure succeeds.
-                      setPendingProvider('local')
+                      // Surface the matching configure form immediately.
+                      // Server provider only flips once /local/configure
+                      // or /smb/connect succeeds.
+                      setPendingProvider(next)
                     }
                   }}
                 >
                   <option value="gdrive">Google Drive</option>
                   <option value="local">Local drive / mounted folder</option>
+                  <option value="smb">SMB share</option>
                 </Input>
               </FormGroup>
 
@@ -481,6 +499,45 @@ export function Cloud() {
                         onError={setError}
                       />
                     </>
+                  )}
+                </>
+              )}
+
+              {activeProvider === 'smb' && (
+                <>
+                  {smb.error && (
+                    <Alert color="danger" className="mb-2">
+                      Failed to read SMB status: {smb.error}
+                    </Alert>
+                  )}
+                  {smb.data?.connected ? (
+                    <>
+                      <p className="text-muted small mb-2">
+                        Backing up to{' '}
+                        <code>
+                          \\{smb.data.host}\{smb.data.share}
+                        </code>{' '}
+                        as <code>{smb.data.user}</code>
+                      </p>
+                      <Button
+                        color="danger"
+                        outline
+                        disabled={busy !== null}
+                        onClick={() => void switchProviderToGdrive()}
+                      >
+                        {busy === 'switch' ? <Spinner size="sm" /> : 'Switch back to Google Drive'}
+                      </Button>
+                    </>
+                  ) : (
+                    <SmbConnectForm
+                      onConnected={() => {
+                        setPendingProvider(null)
+                        cloud.refresh()
+                        smb.refresh()
+                        setSuccess('SMB share connected')
+                      }}
+                      onError={setError}
+                    />
                   )}
                 </>
               )}

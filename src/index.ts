@@ -3,6 +3,7 @@ import { Plugin } from '@signalk/server-api'
 import { Request, Response, IRouter } from 'express'
 import { BackupClient } from './backup-client.js'
 import { registerProxy } from './proxy.js'
+import { discoverSmbHosts, shutdownSmbDiscovery } from './smb-discovery.js'
 import {
   BackupServerAPI,
   ContainerConfig,
@@ -191,6 +192,7 @@ export default function (app: BackupServerAPI): Plugin {
     async stop() {
       app.debug('Stopping signalk-backup')
       stopDbExportTimer()
+      shutdownSmbDiscovery()
       client = null
       containerAddress = null
 
@@ -320,9 +322,32 @@ export default function (app: BackupServerAPI): Plugin {
         }
       })
 
+      // mDNS-based SMB discovery runs in the SignalK process (not the
+      // backup-server container) so multicast doesn't have to traverse
+      // the container's network. Returns whatever responds on
+      // _smb._tcp.local within the timeout. UI uses this to populate a
+      // host-picker dropdown; manual host entry is the always-available
+      // fallback when nothing responds.
+      router.get('/api/cloud/smb/discover', async (_req: Request, res: Response) => {
+        try {
+          const hosts = await discoverSmbHosts(2000)
+          res.json({
+            success: true,
+            data: { hosts },
+            timestamp: new Date().toISOString()
+          })
+        } catch (err) {
+          res.status(500).json({
+            success: false,
+            error: { code: 'DISCOVER_FAILED', message: errMsg(err) },
+            timestamp: new Date().toISOString()
+          })
+        }
+      })
+
       // Proxy /api/* to the backup-server. Registered LAST so the
-      // explicit /api/update/{check,apply} above match first.
-      // containerAddress includes the scheme (http:// or https://) so
+      // explicit /api/update/{check,apply} and /api/cloud/smb/discover
+      // above match first. containerAddress includes the scheme so
       // external-mode HTTPS upstreams aren't downgraded.
       registerProxy(router, {
         getUpstreamBase: () => containerAddress,
