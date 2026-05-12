@@ -778,6 +778,11 @@ function RetentionCard() {
   }, [cfg.data])
 
   const onSave = async (): Promise<void> => {
+    // Clear previous feedback up front — otherwise a prior success
+    // alert sticks around even if this attempt fails validation.
+    setError(null)
+    setSuccess(null)
+
     // Strict integer parse — parseInt would silently accept "1.9" → 1
     // or "12abc" → 12, both wrong here. Match digits-only first, then
     // bounds-check the result.
@@ -798,8 +803,6 @@ function RetentionCard() {
       parsed[k] = v
     }
     setBusy(true)
-    setError(null)
-    setSuccess(null)
     try {
       await api.setRetention(parsed)
       cfg.refresh()
