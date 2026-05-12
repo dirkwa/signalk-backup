@@ -100,6 +100,70 @@ function SchedulerCard() {
 //     so just round-trip them)
 //   - per-dir: emit "<name>/" when the user wants it excluded
 // Locked plugin dirs are non-editable (the server enforces them anyway).
+interface Row {
+  name: string
+  size: number
+  excluded: boolean
+  locked?: boolean
+  lockReason?: string
+}
+
+function RowsTable(props: {
+  rows: Row[]
+  isExcluded: (name: string, defaultExcluded: boolean) => boolean
+  toggle: (name: string, currentEffective: boolean, serverDefault: boolean) => void
+  stripPrefix?: string
+  showNote?: boolean
+}) {
+  const { rows, isExcluded, toggle, stripPrefix, showNote } = props
+  if (rows.length === 0) return null
+  return (
+    <Table responsive striped size="sm" className="mb-2">
+      <thead>
+        <tr>
+          <th style={{ width: '4em' }}>Include</th>
+          <th>Directory</th>
+          <th style={{ width: '7em' }}>Size</th>
+          {showNote && <th>Note</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((d) => {
+          const excluded = isExcluded(d.name, d.excluded)
+          const displayName =
+            stripPrefix && d.name.startsWith(stripPrefix)
+              ? d.name.slice(stripPrefix.length)
+              : d.name
+          return (
+            <tr key={d.name}>
+              <td>
+                <Input
+                  type="checkbox"
+                  checked={!excluded}
+                  disabled={d.locked}
+                  onChange={() => {
+                    toggle(d.name, excluded, d.excluded)
+                  }}
+                  aria-label={`Include ${d.name}`}
+                />
+              </td>
+              <td>
+                <code className="small">{displayName}</code>
+              </td>
+              <td>{formatBytes(d.size)}</td>
+              {showNote && (
+                <td className="text-muted small" title={d.lockReason ?? ''}>
+                  {d.lockReason ? `🔒 ${d.lockReason}` : ''}
+                </td>
+              )}
+            </tr>
+          )
+        })}
+      </tbody>
+    </Table>
+  )
+}
+
 function ExclusionsCard() {
   const dirs = useApi(() => api.dataDirs())
   const pluginDirs = useApi(() => api.pluginDataDirs())
@@ -116,34 +180,44 @@ function ExclusionsCard() {
     setOverrides({})
   }, [exclusions.data, dirs.data, pluginDirs.data])
 
-  const allDirs: {
-    name: string
-    size: number
-    excluded: boolean
-    locked?: boolean
-    lockReason?: string
-  }[] = useMemo(() => {
-    const result: {
-      name: string
-      size: number
-      excluded: boolean
-      locked?: boolean
-      lockReason?: string
-    }[] = []
-    for (const d of dirs.data ?? []) {
-      result.push({ name: d.name, size: d.size, excluded: d.excluded })
-    }
-    for (const p of pluginDirs.data ?? []) {
-      result.push({
-        name: `plugin-config-data/${p.name}/`,
-        size: p.size,
-        excluded: p.excluded,
-        locked: p.lockedExcluded,
-        lockReason: p.lockReason
-      })
-    }
-    return result
-  }, [dirs.data, pluginDirs.data])
+  // Three sections in the card. plugin-config-data is rendered as a
+  // section header (no checkbox, no size) — its children appear in
+  // sections 2 and 3 below it, split by whether the server has them
+  // locked. The full server-returned set (incl. plugin-config-data
+  // itself) is still used by onSave's raw-pattern filter so a
+  // user-supplied "plugin-config-data/" pattern set out-of-band
+  // doesn't get dropped on save.
+  const topLevelDirs: Row[] = useMemo(
+    () =>
+      (dirs.data ?? [])
+        .filter((d) => d.name !== 'plugin-config-data')
+        .map((d) => ({ name: d.name, size: d.size, excluded: d.excluded })),
+    [dirs.data]
+  )
+  const editablePluginDirs: Row[] = useMemo(
+    () =>
+      (pluginDirs.data ?? [])
+        .filter((p) => !p.lockedExcluded)
+        .map((p) => ({
+          name: `plugin-config-data/${p.name}/`,
+          size: p.size,
+          excluded: p.excluded
+        })),
+    [pluginDirs.data]
+  )
+  const lockedPluginDirs: Row[] = useMemo(
+    () =>
+      (pluginDirs.data ?? [])
+        .filter((p) => p.lockedExcluded === true)
+        .map((p) => ({
+          name: `plugin-config-data/${p.name}/`,
+          size: p.size,
+          excluded: p.excluded,
+          locked: true,
+          lockReason: p.lockReason
+        })),
+    [pluginDirs.data]
+  )
 
   const isExcluded = (name: string, defaultExcluded: boolean): boolean =>
     overrides[name] ?? defaultExcluded
@@ -221,41 +295,41 @@ function ExclusionsCard() {
               locked-excluded by the server (live database state, our own kopia repo); see the note
               next to each.
             </p>
-            <Table responsive striped size="sm" className="mb-3">
-              <thead>
-                <tr>
-                  <th>Include</th>
-                  <th>Directory</th>
-                  <th>Size</th>
-                  <th>Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allDirs.map((d) => {
-                  const excluded = isExcluded(d.name, d.excluded)
-                  return (
-                    <tr key={d.name}>
-                      <td>
-                        <Input
-                          type="checkbox"
-                          checked={!excluded}
-                          disabled={d.locked}
-                          onChange={() => {
-                            toggle(d.name, excluded, d.excluded)
-                          }}
-                          aria-label={`Include ${d.name}`}
-                        />
-                      </td>
-                      <td>
-                        <code className="small">{d.name}</code>
-                      </td>
-                      <td>{formatBytes(d.size)}</td>
-                      <td className="text-muted small">{d.lockReason ?? ''}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </Table>
+
+            <h6 className="mb-2">Top-level directories</h6>
+            <RowsTable rows={topLevelDirs} isExcluded={isExcluded} toggle={toggle} />
+
+            <h6 className="mt-4 mb-1">
+              Plugin data <code className="small text-muted">plugin-config-data/</code>
+            </h6>
+            <p className="text-muted small mb-2">
+              Per-plugin state under your SignalK config root.
+            </p>
+
+            {editablePluginDirs.length > 0 && (
+              <>
+                <div className="small text-muted fw-bold mb-1">Editable</div>
+                <RowsTable
+                  rows={editablePluginDirs}
+                  isExcluded={isExcluded}
+                  toggle={toggle}
+                  stripPrefix="plugin-config-data/"
+                />
+              </>
+            )}
+
+            {lockedPluginDirs.length > 0 && (
+              <>
+                <div className="small text-muted fw-bold mt-3 mb-1">Always excluded</div>
+                <RowsTable
+                  rows={lockedPluginDirs}
+                  isExcluded={isExcluded}
+                  toggle={toggle}
+                  stripPrefix="plugin-config-data/"
+                  showNote
+                />
+              </>
+            )}
 
             <div className="d-flex align-items-center gap-2">
               <Button color="primary" disabled={!dirty || saving} onClick={() => void onSave()}>
