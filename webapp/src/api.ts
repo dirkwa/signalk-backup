@@ -188,6 +188,17 @@ export interface PluginDataDirEntry {
   lockReason?: string
 }
 
+export interface RetentionConfig {
+  /** Number of hourly backups to keep. */
+  hourly: number
+  /** Number of daily backups to keep. */
+  daily: number
+  /** Number of weekly backups to keep. */
+  weekly: number
+  /** Number of startup-time backups to keep. */
+  startup: number
+}
+
 export interface DbExportConfig {
   /** Whether the QuestDB exporter runs on the interval. */
   questdb: boolean
@@ -360,6 +371,16 @@ export const api = {
   schedulerStart: () =>
     request<{ enabled: boolean }>('/backups/scheduler/start', { method: 'POST' }),
   schedulerStop: () => request<{ enabled: boolean }>('/backups/scheduler/stop', { method: 'POST' }),
+
+  // Retention — how many backups of each tier kopia keeps. Manual
+  // backups are absent on purpose (never auto-pruned).
+  retention: () => request<RetentionConfig>('/backups/retention'),
+  setRetention: (next: Partial<RetentionConfig>) =>
+    request<RetentionConfig>('/backups/retention', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next)
+    }),
 
   // Exclusions — the list of glob patterns kopia skips during backup.
   // The patterns set here is the user-configurable layer; the server

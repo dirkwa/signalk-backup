@@ -705,6 +705,150 @@ function DbExportCard() {
 }
 
 // ---------------------------------------------------------------------------
+// Retention card
+// ---------------------------------------------------------------------------
+//
+// Controls how many of each scheduled-backup tier kopia keeps. Manual
+// backups are deliberately absent — never auto-pruned, because the
+// user explicitly created them. The server-side enforcement runs after
+// every successful scheduled backup; lowering a number takes effect
+// at the next scheduled run, not retroactively.
+function RetentionCard() {
+  const cfg = useApi(() => api.retention(), { intervalMs: 60_000 })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+
+  // Local mirror so each input edits freely without thrashing the server.
+  const [draft, setDraft] = useState<{
+    hourly: string
+    daily: string
+    weekly: string
+    startup: string
+  }>({ hourly: '', daily: '', weekly: '', startup: '' })
+
+  useEffect(() => {
+    if (cfg.data) {
+      setDraft({
+        hourly: String(cfg.data.hourly),
+        daily: String(cfg.data.daily),
+        weekly: String(cfg.data.weekly),
+        startup: String(cfg.data.startup)
+      })
+    }
+  }, [cfg.data])
+
+  const onSave = async (): Promise<void> => {
+    const parsed = {
+      hourly: parseInt(draft.hourly, 10),
+      daily: parseInt(draft.daily, 10),
+      weekly: parseInt(draft.weekly, 10),
+      startup: parseInt(draft.startup, 10)
+    }
+    for (const [k, v] of Object.entries(parsed)) {
+      if (!Number.isFinite(v) || v < 1 || v > 365) {
+        setError(`${k} must be a whole number between 1 and 365`)
+        return
+      }
+    }
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      await api.setRetention(parsed)
+      cfg.refresh()
+      setSuccess('Retention policy saved')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const dirty =
+    cfg.data !== null &&
+    (String(cfg.data.hourly) !== draft.hourly ||
+      String(cfg.data.daily) !== draft.daily ||
+      String(cfg.data.weekly) !== draft.weekly ||
+      String(cfg.data.startup) !== draft.startup)
+
+  const tiers: { key: 'hourly' | 'daily' | 'weekly' | 'startup'; label: string; help: string }[] = [
+    { key: 'hourly', label: 'Hourly', help: '24 = one full day at 1-per-hour' },
+    { key: 'daily', label: 'Daily', help: '7 = one full week at 1-per-day' },
+    { key: 'weekly', label: 'Weekly', help: '4 = roughly one month' },
+    { key: 'startup', label: 'On startup', help: 'Created when SignalK boots after >24h offline' }
+  ]
+
+  return (
+    <Card className="mb-3">
+      <CardHeader>
+        <strong>Retention</strong>
+      </CardHeader>
+      <CardBody>
+        {cfg.loading && !cfg.data ? (
+          <Spinner size="sm" />
+        ) : cfg.error ? (
+          <Alert color="danger" className="mb-0">
+            {cfg.error}
+          </Alert>
+        ) : cfg.data ? (
+          <>
+            <p className="text-muted small mb-3">
+              How many backups of each scheduled tier to keep. Older ones get pruned after the next
+              scheduled backup. Manual backups are never auto-pruned.
+            </p>
+
+            <Form
+              onSubmit={(e) => {
+                e.preventDefault()
+                void onSave()
+              }}
+            >
+              {tiers.map((t) => (
+                <FormGroup key={t.key} className="mb-2">
+                  <Label for={`retention-${t.key}`}>{t.label}</Label>
+                  <div className="d-flex gap-2 align-items-center">
+                    <Input
+                      id={`retention-${t.key}`}
+                      type="number"
+                      min={1}
+                      max={365}
+                      step={1}
+                      value={draft[t.key]}
+                      disabled={busy}
+                      onChange={(e) => {
+                        setDraft((d) => ({ ...d, [t.key]: e.target.value }))
+                      }}
+                      style={{ maxWidth: '8em' }}
+                    />
+                    <small className="text-muted">{t.help}</small>
+                  </div>
+                </FormGroup>
+              ))}
+
+              <Button color="primary" type="submit" disabled={busy || !dirty} className="mt-2">
+                {busy ? <Spinner size="sm" /> : 'Save retention policy'}
+              </Button>
+            </Form>
+
+            {error && (
+              <Alert color="danger" className="mt-3 mb-0">
+                {error}
+              </Alert>
+            )}
+            {success && (
+              <Alert color="success" className="mt-3 mb-0">
+                {success}
+              </Alert>
+            )}
+          </>
+        ) : null}
+      </CardBody>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 export function Settings() {
@@ -712,6 +856,7 @@ export function Settings() {
     <>
       <h2 className="mb-3">Settings</h2>
       <SchedulerCard />
+      <RetentionCard />
       <ExclusionsCard />
       <DbExportCard />
       <PasswordCard />
