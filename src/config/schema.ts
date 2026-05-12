@@ -31,22 +31,19 @@ export const ConfigSchema = Type.Object({
       'Leave blank when managing the container.'
   }),
   /**
-   * Database-export config. NOT shown in the Admin UI form — managed
-   * via the webapp's Settings → Database export card. Persisted here
-   * so it round-trips through SignalK's plugin-options store. Field
-   * still has to exist in the schema or savePluginOptions would drop
-   * the value.
+   * Database-export config. Hidden from the SignalK Admin UI form via
+   * the plugin's `uiSchema` (see `src/index.ts` plugin export) —
+   * managed instead through the webapp's Settings → Database export
+   * card.
+   * Field still has to exist in the schema or savePluginOptions would
+   * drop the value when round-tripping through SignalK's store.
    */
   databaseExport: Type.Object(
     {
       questdb: Type.Boolean({ default: false }),
       intervalMinutes: Type.Number({ default: 60, minimum: 5, maximum: 1440 })
     },
-    {
-      default: { questdb: false, intervalMinutes: 60 },
-      // Hidden from the SignalK Admin UI form — webapp manages it.
-      'ui:widget': 'hidden'
-    }
+    { default: { questdb: false, intervalMinutes: 60 } }
   )
 })
 
