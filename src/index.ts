@@ -178,6 +178,11 @@ export default function (app: BackupServerAPI): Plugin {
 
     schema: ConfigSchema,
 
+    // RJSF reads hide-field directives from a sibling uiSchema, not the JSON schema.
+    uiSchema: {
+      databaseExport: { 'ui:widget': 'hidden' }
+    },
+
     start(config: Partial<Config>) {
       app.debug('Starting signalk-backup')
       // CRITICAL: Signal K does not seed schema defaults into the runtime
