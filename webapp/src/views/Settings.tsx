@@ -727,29 +727,61 @@ function RetentionCard() {
     startup: string
   }>({ hourly: '', daily: '', weekly: '', startup: '' })
 
+  // Snapshot of the canonical server values the draft was last synced
+  // from. Lets us tell "user just opened the card" (draft equals
+  // snapshot OR snapshot is empty) from "user has unsaved edits"
+  // (draft diverges from snapshot). useApi's 60s poll would otherwise
+  // overwrite in-flight edits every minute.
+  const [serverSnapshot, setServerSnapshot] = useState<typeof draft>({
+    hourly: '',
+    daily: '',
+    weekly: '',
+    startup: ''
+  })
+
   useEffect(() => {
-    if (cfg.data) {
-      setDraft({
-        hourly: String(cfg.data.hourly),
-        daily: String(cfg.data.daily),
-        weekly: String(cfg.data.weekly),
-        startup: String(cfg.data.startup)
-      })
+    if (!cfg.data) return
+    const canonical = {
+      hourly: String(cfg.data.hourly),
+      daily: String(cfg.data.daily),
+      weekly: String(cfg.data.weekly),
+      startup: String(cfg.data.startup)
     }
-  }, [cfg.data])
+    // Skip sync when the user has unsaved edits — preserve their input.
+    // First-load is also draft.hourly === '' so the empty-string check
+    // catches it.
+    const draftIsClean =
+      draft.hourly === serverSnapshot.hourly &&
+      draft.daily === serverSnapshot.daily &&
+      draft.weekly === serverSnapshot.weekly &&
+      draft.startup === serverSnapshot.startup
+    if (draftIsClean) {
+      setDraft(canonical)
+    }
+    setServerSnapshot(canonical)
+    // serverSnapshot intentionally not in deps — it's the comparison
+    // anchor; including it would loop the effect each tick.
+  }, [cfg.data]) // eslint-disable-line
 
   const onSave = async (): Promise<void> => {
-    const parsed = {
-      hourly: parseInt(draft.hourly, 10),
-      daily: parseInt(draft.daily, 10),
-      weekly: parseInt(draft.weekly, 10),
-      startup: parseInt(draft.startup, 10)
-    }
-    for (const [k, v] of Object.entries(parsed)) {
-      if (!Number.isFinite(v) || v < 1 || v > 365) {
+    // Strict integer parse — parseInt would silently accept "1.9" → 1
+    // or "12abc" → 12, both wrong here. Match digits-only first, then
+    // bounds-check the result.
+    const INT_RE = /^\d+$/
+    const fields = ['hourly', 'daily', 'weekly', 'startup'] as const
+    const parsed = {} as Record<(typeof fields)[number], number>
+    for (const k of fields) {
+      const raw = draft[k].trim()
+      if (!INT_RE.test(raw)) {
         setError(`${k} must be a whole number between 1 and 365`)
         return
       }
+      const v = Number(raw)
+      if (v < 1 || v > 365) {
+        setError(`${k} must be a whole number between 1 and 365`)
+        return
+      }
+      parsed[k] = v
     }
     setBusy(true)
     setError(null)
