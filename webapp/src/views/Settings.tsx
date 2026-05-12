@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Badge,
@@ -720,48 +720,62 @@ function RetentionCard() {
   const [success, setSuccess] = useState<string | null>(null)
 
   // Local mirror so each input edits freely without thrashing the server.
-  const [draft, setDraft] = useState<{
-    hourly: string
-    daily: string
-    weekly: string
-    startup: string
-  }>({ hourly: '', daily: '', weekly: '', startup: '' })
-
-  // Snapshot of the canonical server values the draft was last synced
-  // from. Lets us tell "user just opened the card" (draft equals
-  // snapshot OR snapshot is empty) from "user has unsaved edits"
-  // (draft diverges from snapshot). useApi's 60s poll would otherwise
-  // overwrite in-flight edits every minute.
-  const [serverSnapshot, setServerSnapshot] = useState<typeof draft>({
+  type RetentionDraft = { hourly: string; daily: string; weekly: string; startup: string }
+  const [draft, setDraft] = useState<RetentionDraft>({
     hourly: '',
     daily: '',
     weekly: '',
     startup: ''
   })
 
+  // Snapshot of the canonical server values the draft was last synced
+  // from. Lets the poll effect tell "user has unsaved edits" (draft
+  // diverges from snapshot) from "user hasn't touched the form since
+  // last sync" (draft equals snapshot).
+  const [serverSnapshot, setServerSnapshot] = useState<RetentionDraft>({
+    hourly: '',
+    daily: '',
+    weekly: '',
+    startup: ''
+  })
+
+  // Refs mirror the latest state so the poll effect (deps: [cfg.data])
+  // reads current values, not the stale closure from the render where
+  // the effect was wired up. Without these, the comparison below would
+  // be against whatever draft/snapshot existed at the previous effect
+  // run, not the latest user edits.
+  const draftRef = useRef(draft)
+  const snapshotRef = useRef(serverSnapshot)
+  useEffect(() => {
+    draftRef.current = draft
+  }, [draft])
+  useEffect(() => {
+    snapshotRef.current = serverSnapshot
+  }, [serverSnapshot])
+
   useEffect(() => {
     if (!cfg.data) return
-    const canonical = {
+    const canonical: RetentionDraft = {
       hourly: String(cfg.data.hourly),
       daily: String(cfg.data.daily),
       weekly: String(cfg.data.weekly),
       startup: String(cfg.data.startup)
     }
+    const currentDraft = draftRef.current
+    const currentSnapshot = snapshotRef.current
     // Skip sync when the user has unsaved edits — preserve their input.
-    // First-load is also draft.hourly === '' so the empty-string check
-    // catches it.
+    // First-load drafts are all '' === serverSnapshot's '' so the
+    // empty-string check covers it.
     const draftIsClean =
-      draft.hourly === serverSnapshot.hourly &&
-      draft.daily === serverSnapshot.daily &&
-      draft.weekly === serverSnapshot.weekly &&
-      draft.startup === serverSnapshot.startup
+      currentDraft.hourly === currentSnapshot.hourly &&
+      currentDraft.daily === currentSnapshot.daily &&
+      currentDraft.weekly === currentSnapshot.weekly &&
+      currentDraft.startup === currentSnapshot.startup
     if (draftIsClean) {
       setDraft(canonical)
     }
     setServerSnapshot(canonical)
-    // serverSnapshot intentionally not in deps — it's the comparison
-    // anchor; including it would loop the effect each tick.
-  }, [cfg.data]) // eslint-disable-line
+  }, [cfg.data])
 
   const onSave = async (): Promise<void> => {
     // Strict integer parse — parseInt would silently accept "1.9" → 1
