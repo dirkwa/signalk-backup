@@ -86,10 +86,38 @@ export type CloudSyncFrequency = 'daily' | 'weekly'
  * - 'gdrive': Google Drive via rclone (OAuth)
  * - 'local': a host path (USB drive, NFS mount, anything mounted under
  *   /media or /mnt). No rclone — kopia writes to the path directly.
- *
- * Future variants ('smb', …) extend this union the same way.
+ * - 'smb': SMB/CIFS share (NAS, Synology, TrueNAS, Windows shares,
+ *   generic Samba) via rclone's smb backend.
  */
-export type CloudSyncProvider = 'gdrive' | 'local'
+export type CloudSyncProvider = 'gdrive' | 'local' | 'smb'
+
+export interface SmbStatus {
+  /** True when SMB credentials exist in rclone.conf. */
+  connected: boolean
+  /** Always equals connected for SMB (no separate "configured" state). */
+  configured: boolean
+  /** Active share host. */
+  host?: string
+  share?: string
+  user?: string
+  /** Convenience label, "user@host/share". */
+  email?: string
+}
+
+export interface SmbDiscoveredHost {
+  /** mDNS name (often the device's friendly name). */
+  name: string
+  /** First IP address from the responder (IPv4 preferred). */
+  address: string
+}
+
+export interface SmbConnectInput {
+  host: string
+  share: string
+  user: string
+  password: string
+  domain?: string
+}
 
 export interface LocalCandidate {
   /** Container-side path — what gets persisted via /local/configure. */
@@ -284,6 +312,20 @@ export const api = {
     }),
   localDisconnect: () =>
     request<{ disconnected: boolean }>('/cloud/local/disconnect', { method: 'POST' }),
+
+  // SMB share destination. Discover runs on the plugin (SignalK process)
+  // — multicast doesn't have to traverse the backup-server container's
+  // network. The other three are proxied through to backup-server.
+  smbStatus: () => request<SmbStatus>('/cloud/smb/status'),
+  smbDiscover: () => request<{ hosts: SmbDiscoveredHost[] }>('/cloud/smb/discover'),
+  smbConnect: (input: SmbConnectInput) =>
+    request<{ connected: boolean }>('/cloud/smb/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input)
+    }),
+  smbDisconnect: () =>
+    request<{ disconnected: boolean }>('/cloud/smb/disconnect', { method: 'POST' }),
 
   cloudSync: () => request<{ started: boolean }>('/cloud/sync', { method: 'POST' }),
   cloudSyncCancel: () => request<{ cancelled: boolean }>('/cloud/sync/cancel', { method: 'POST' }),
