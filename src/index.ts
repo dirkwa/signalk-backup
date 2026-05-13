@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { hostname } from 'node:os'
 import { Plugin } from '@signalk/server-api'
 import { Request, Response, IRouter } from 'express'
 import { BackupClient } from './backup-client.js'
@@ -147,6 +148,8 @@ export default function (app: BackupServerAPI): Plugin {
       DATA_DIR: `${SK_MOUNT}/plugin-config-data/${PLUGIN_ID}`,
       SIGNALK_DATA_PATH: SK_MOUNT,
       SIGNALK_VERSION: getSignalKVersion(app),
+      // Container's own hostname is a hex id; install-identity needs the host's real name for the folderId.
+      HOST_HOSTNAME: hostname(),
       // Hardcoded to "info" — power users override via signalk-container's
       // containerOverrides.signalk-backup-server.env.LOG_LEVEL.
       LOG_LEVEL: 'info'
