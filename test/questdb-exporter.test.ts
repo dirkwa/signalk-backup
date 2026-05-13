@@ -213,7 +213,9 @@ describe('QuestDBExporter', () => {
       const result = await exporter.exportAll(stagingDir)
 
       // W10 is way outside the churn window — never re-exported.
-      const w10Calls = calls.filter((c) => c.includes('W10'))
+      // Match by the from= ISO timestamp; URLs carry timestamps, not week labels.
+      const w10Start = '2026-03-02T00:00:00.000Z'
+      const w10Calls = calls.filter((c) => new URL(c).searchParams.get('from') === w10Start)
       expect(w10Calls).toEqual([])
       // The old file is untouched on disk.
       const same = (await stat(join(tableDir, 'signalk_2026-W10.parquet'))).size
@@ -315,9 +317,11 @@ describe('QuestDBExporter', () => {
       })
       const result = await exporter.exportAll(stagingDir)
       expect(result.tables.map((t) => t.table)).toEqual(['good_table'])
-      // bad_table should leave no .partial behind.
-      const goodFiles = await readdir(join(stagingDir, 'good_table'))
-      expect(goodFiles.filter((f) => f.endsWith('.partial'))).toEqual([])
+      // bad_table should leave no .partial behind in its own dir
+      // (catch ENOENT for the case where exportAll never created the dir).
+      const badDir = join(stagingDir, 'bad_table')
+      const badFiles = await readdir(badDir).catch(() => [] as string[])
+      expect(badFiles.filter((f) => f.endsWith('.partial'))).toEqual([])
     })
 
     it('refuses table names that fail safe-identifier check', async () => {

@@ -290,7 +290,13 @@ export class QuestDBExporter implements DatabaseExporter {
       throw err
     }
 
-    await rename(tempPath, finalPath)
+    try {
+      await rename(tempPath, finalPath)
+    } catch (err) {
+      // Rename can fail (cross-device, permissions) — clean up the orphan so it doesn't accumulate.
+      await unlink(tempPath).catch(() => undefined)
+      throw err
+    }
     return { bytes }
   }
 }
