@@ -148,9 +148,7 @@ export default function (app: BackupServerAPI): Plugin {
       DATA_DIR: `${SK_MOUNT}/plugin-config-data/${PLUGIN_ID}`,
       SIGNALK_DATA_PATH: SK_MOUNT,
       SIGNALK_VERSION: getSignalKVersion(app),
-      // Surface the host's hostname into the container so install-identity
-      // can include it in the cloud folder name; without this the
-      // container only sees its own auto-generated hex hostname.
+      // Container's own hostname is a hex id; install-identity needs the host's real name for the folderId.
       HOST_HOSTNAME: hostname(),
       // Hardcoded to "info" — power users override via signalk-container's
       // containerOverrides.signalk-backup-server.env.LOG_LEVEL.
