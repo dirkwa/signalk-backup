@@ -89,7 +89,7 @@ export class GrafanaExporter implements DatabaseExporter {
         table: 'dashboards',
         tableDir: join(stagingDir, 'dashboards'),
         shardsWritten: bytes.count,
-        shardsSkipped: 0,
+        shardsSkipped: bytes.skipped,
         bytes: bytes.totalBytes
       })
       totalBytes += bytes.totalBytes
@@ -103,7 +103,7 @@ export class GrafanaExporter implements DatabaseExporter {
         table: 'provisioning',
         tableDir: join(stagingDir, 'provisioning'),
         shardsWritten: bytes.count,
-        shardsSkipped: 0,
+        shardsSkipped: bytes.skipped,
         bytes: bytes.totalBytes
       })
       totalBytes += bytes.totalBytes
@@ -143,6 +143,7 @@ export class GrafanaExporter implements DatabaseExporter {
 
   private async exportDashboards(stagingDir: string): Promise<{
     count: number
+    skipped: number
     totalBytes: number
   }> {
     const url = `${this.baseUrl}/plugins/${this.pluginId}/api/full-export/dashboards`
@@ -161,23 +162,32 @@ export class GrafanaExporter implements DatabaseExporter {
 
     let totalBytes = 0
     let count = 0
+    let skipped = 0
     for (const raw of body.dashboards) {
       const entry = this.parseDashboardEntry(raw)
-      if (!entry) continue
+      if (!entry) {
+        skipped++
+        continue
+      }
       try {
         totalBytes += await this.fetchDashboardFile(entry, dashboardsDir)
         count++
       } catch (err) {
+        skipped++
         this.log(`dashboard ${entry.name} failed: ${errMsg(err)}`)
       }
     }
-    return { count, totalBytes }
+    return { count, skipped, totalBytes }
   }
 
   private parseDashboardEntry(raw: unknown): DashboardEntry | null {
     if (!raw || typeof raw !== 'object') return null
     const o = raw as Record<string, unknown>
     if (typeof o.name !== 'string' || !SAFE_FILENAME.test(o.name)) return null
+    // SAFE_FILENAME matches "." and "..", which would resolve to the dir
+    // itself or its parent under join(). Server rejects these too, but
+    // belt-and-braces is cheap.
+    if (o.name === '.' || o.name === '..') return null
     if (typeof o.sha256 !== 'string' || typeof o.bytes !== 'number') return null
     return { name: o.name, sha256: o.sha256, bytes: o.bytes }
   }
@@ -193,6 +203,7 @@ export class GrafanaExporter implements DatabaseExporter {
 
   private async exportProvisioning(stagingDir: string): Promise<{
     count: number
+    skipped: number
     totalBytes: number
   }> {
     const url = `${this.baseUrl}/plugins/${this.pluginId}/api/full-export/provisioning`
@@ -211,17 +222,22 @@ export class GrafanaExporter implements DatabaseExporter {
 
     let totalBytes = 0
     let count = 0
+    let skipped = 0
     for (const raw of body.files) {
       const entry = this.parseProvisioningEntry(raw)
-      if (!entry) continue
+      if (!entry) {
+        skipped++
+        continue
+      }
       try {
         totalBytes += await this.fetchProvisioningFile(entry, provisioningDir)
         count++
       } catch (err) {
+        skipped++
         this.log(`provisioning ${entry.relPath} failed: ${errMsg(err)}`)
       }
     }
-    return { count, totalBytes }
+    return { count, skipped, totalBytes }
   }
 
   private parseProvisioningEntry(raw: unknown): ProvisioningEntry | null {

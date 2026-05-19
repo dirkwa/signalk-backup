@@ -25,7 +25,7 @@ export interface ExportOrchestratorOptions {
   signalkBaseUrl: string
   /** Optional debug logger. */
   log?: (msg: string) => void
-  // Missing key = enabled, so legacy callers that don't pass `enabled` keep working.
+  // Missing key = disabled, matching SCHEMA_DEFAULTS.databaseExport.
   enabled?: { questdb?: boolean; grafana?: boolean }
 }
 
@@ -45,7 +45,7 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
 
   const enabled = opts.enabled ?? {}
   const exporters: DatabaseExporter[] = []
-  if (enabled.questdb !== false) {
+  if (enabled.questdb === true) {
     exporters.push(
       new QuestDBExporter({
         signalkBaseUrl: opts.signalkBaseUrl,
@@ -53,7 +53,7 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
       })
     )
   }
-  if (enabled.grafana !== false) {
+  if (enabled.grafana === true) {
     exporters.push(
       new GrafanaExporter({
         signalkBaseUrl: opts.signalkBaseUrl,

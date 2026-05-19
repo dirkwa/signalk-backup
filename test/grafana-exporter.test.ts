@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { GrafanaExporter } from '../src/database-export/grafana.js'
@@ -306,8 +307,10 @@ describe('GrafanaExporter', () => {
     })
 
     it('rejects provisioning entries with traversal segments', async () => {
+      const requested: string[] = []
       const fetchImpl: typeof fetch = (input: FetchInput) => {
         const url = urlOf(input)
+        requested.push(url)
         if (url.endsWith('/full-export/dashboards')) {
           return Promise.resolve(new Response(JSON.stringify({ dashboards: [] }), { status: 200 }))
         }
@@ -352,6 +355,14 @@ describe('GrafanaExporter', () => {
       const result = await exporter.exportAll(stagingDir)
       const provTable = result.tables.find((t) => t.table === 'provisioning')
       expect(provTable?.shardsWritten).toBe(1)
+      expect(provTable?.shardsSkipped).toBe(1)
+      // No request should have leaked the traversal entry through, in
+      // either raw or url-encoded form.
+      for (const url of requested) {
+        expect(url).not.toMatch(/\.\.\/etc\/passwd/)
+        expect(url.toLowerCase()).not.toContain('%2e%2e')
+        expect(url).not.toContain('evil.yaml')
+      }
       // Confirm no traversal happened — there should be no /etc/passwd
       // anywhere outside the staging tree, and the only provisioning
       // file should be the legitimate one.
@@ -359,6 +370,7 @@ describe('GrafanaExporter', () => {
       const dsDir = join(provRoot, 'datasources')
       const inside = await readdir(dsDir)
       expect(inside).toEqual(['questdb.yaml'])
+      expect(existsSync(join(stagingDir, '..', 'etc'))).toBe(false)
     })
 
     it('handles a failed DB export without aborting dashboards/provisioning', async () => {
