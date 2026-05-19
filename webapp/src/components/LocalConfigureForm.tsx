@@ -20,11 +20,28 @@ interface Props {
   onError: (msg: string) => void
 }
 
+// Map a host-side path the user types (e.g. `/media/dirk/USB-SSD`) to
+// the equivalent container-side path the backup engine sees. Returns
+// null when the host path isn't under one of the bind-mounted prefixes
+// so the caller can surface a clear validation error instead of letting
+// the server reject it later.
+function hostPathToContainerPath(hostPath: string): string | null {
+  const normalized = hostPath.trim().replace(/\/+$/, '')
+  if (normalized === '/media' || normalized.startsWith('/media/')) {
+    return '/host-media' + normalized.slice('/media'.length)
+  }
+  if (normalized === '/mnt' || normalized.startsWith('/mnt/')) {
+    return '/host-mnt' + normalized.slice('/mnt'.length)
+  }
+  return null
+}
+
 /**
  * Picker for the `local` destination. Lists candidates from
- * /cloud/local/discover (subdirs of /host-media + /host-mnt) and lets
- * the user pick one. A manual `containerPath` text field is the escape
- * hatch for paths that don't show up in discovery.
+ * /cloud/local/discover (subdirectories of `/media` and `/mnt` on the
+ * host, surfaced inside the container under `/host-media` and
+ * `/host-mnt`) and lets the user pick one. A manual host-path text
+ * field is the escape hatch for paths that don't show up in discovery.
  */
 export function LocalConfigureForm({ onConfigured, onError }: Props) {
   const [candidates, setCandidates] = useState<LocalCandidate[] | null>(null)
@@ -86,11 +103,19 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
   }
 
   const onUseManual = (): void => {
-    if (!manualPath.trim()) return
-    // Manual path must already be the container-side path (under
-    // /host-media or /host-mnt). Server validates and rejects with 400
-    // if not.
-    void submit(manualPath.trim(), manualPath.trim())
+    const hostPath = manualPath.trim()
+    if (!hostPath) return
+    const containerPath = hostPathToContainerPath(hostPath)
+    if (!containerPath) {
+      onError(
+        `Path must live under /media or /mnt — those are the only host ` +
+          `locations the backup engine can see. Plug a USB drive in (it ` +
+          `auto-mounts under /media), or have the system administrator ` +
+          `mount your destination under /mnt.`
+      )
+      return
+    }
+    void submit(containerPath, hostPath)
   }
 
   return (
@@ -149,12 +174,12 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
       <hr className="my-3" />
 
       <FormGroup>
-        <Label for="manual-path">Or type a container path manually</Label>
+        <Label for="manual-path">Or type a host path manually</Label>
         <div className="d-flex gap-2">
           <Input
             id="manual-path"
             type="text"
-            placeholder="/host-media/USB-SSD or /host-mnt/nfs-share"
+            placeholder="/media/dirk/USB-SSD or /mnt/nfs-share"
             value={manualPath}
             disabled={submitting}
             onChange={(e) => {
@@ -170,8 +195,9 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
           </Button>
         </div>
         <small className="text-muted">
-          Path must live under <code>/host-media</code> or <code>/host-mnt</code> — those are the
-          baseline mounts the backup engine sees from the host.
+          Enter the path the way you see it on the host — <code>/media/...</code> for plugged-in USB
+          drives, <code>/mnt/...</code> for network shares mounted by the system. The backup engine
+          sees the same locations.
         </small>
       </FormGroup>
     </div>
