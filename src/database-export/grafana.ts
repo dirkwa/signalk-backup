@@ -169,9 +169,11 @@ export class GrafanaExporter implements DatabaseExporter {
     }
 
     const dashboardsDir = join(stagingDir, 'dashboards')
-    await mkdir(dashboardsDir, { recursive: true })
-    // Drop any leftover .partial files from a previous crashed export.
-    await this.cleanupPartials(dashboardsDir)
+    // Reset the staging dir before each export. Dashboards can be
+    // renamed or deleted in Grafana between cycles, and re-fetching
+    // doesn't remove the old files — without this, kopia would keep
+    // snapshotting orphaned JSON forever.
+    await this.resetStagingDir(dashboardsDir)
 
     let totalBytes = 0
     let count = 0
@@ -224,9 +226,9 @@ export class GrafanaExporter implements DatabaseExporter {
     }
 
     const provisioningDir = join(stagingDir, 'provisioning')
-    await mkdir(provisioningDir, { recursive: true })
-    // Clean stale partials from any crashed previous run, anywhere in tree.
-    await this.cleanupPartials(provisioningDir)
+    // Reset for the same reason as dashboards: stale YAMLs from a
+    // previous Grafana provisioning state would otherwise persist.
+    await this.resetStagingDir(provisioningDir)
 
     let totalBytes = 0
     let count = 0
@@ -277,16 +279,19 @@ export class GrafanaExporter implements DatabaseExporter {
     return bytes
   }
 
-  // Wipe any leftover `.partial` files from a prior crashed export so
-  // they don't clutter the staging tree forever (the rename step
-  // normally renames them out; a crash before rename leaves an
-  // orphan).
-  private async cleanupPartials(root: string): Promise<void> {
+  // Wipe and recreate a per-section staging dir so the next export's
+  // file set fully replaces the previous one. Without this, files
+  // that disappeared between cycles (deleted dashboards, removed
+  // datasource YAMLs) would linger in the staging tree and travel
+  // forward in every kopia snapshot indefinitely.
+  private async resetStagingDir(root: string): Promise<void> {
     try {
       await rm(root, { recursive: true, force: true })
       await mkdir(root, { recursive: true })
     } catch {
-      // Best-effort
+      // Best-effort; fall back to whatever directory state already
+      // exists. Per-file rename-into-place will still produce a
+      // consistent result for the files we do fetch this cycle.
     }
   }
 }

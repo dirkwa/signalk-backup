@@ -229,6 +229,49 @@ describe('GrafanaExporter', () => {
       }
     })
 
+    it('wipes stale files from the previous cycle (deleted dashboards do not linger)', async () => {
+      // Cycle 1: two dashboards exist
+      const cycle1 = makeMockFetch({
+        dashboards: [
+          {
+            name: 'keep.json',
+            sha256: 'a'.repeat(64),
+            bytes: 2,
+            content: Buffer.from('{}')
+          },
+          {
+            name: 'delete-me.json',
+            sha256: 'b'.repeat(64),
+            bytes: 2,
+            content: Buffer.from('{}')
+          }
+        ]
+      })
+      await new GrafanaExporter({ fetch: cycle1.fetchImpl }).exportAll(stagingDir)
+      expect(await readdir(join(stagingDir, 'dashboards'))).toEqual(
+        expect.arrayContaining(['keep.json', 'delete-me.json'])
+      )
+
+      // Cycle 2: user deleted "delete-me.json" in Grafana between cycles.
+      // The manifest only lists "keep.json" now. The stale file must
+      // disappear from the staging tree too — otherwise kopia would
+      // keep snapshotting it forever.
+      const cycle2 = makeMockFetch({
+        dashboards: [
+          {
+            name: 'keep.json',
+            sha256: 'a'.repeat(64),
+            bytes: 2,
+            content: Buffer.from('{}')
+          }
+        ]
+      })
+      await new GrafanaExporter({ fetch: cycle2.fetchImpl }).exportAll(stagingDir)
+
+      const after = await readdir(join(stagingDir, 'dashboards'))
+      expect(after).toEqual(['keep.json'])
+    })
+
     it('rejects malformed dashboard entries instead of crashing', async () => {
       // Server returns an entry without sha256; exporter should skip
       // it but still complete the run.
