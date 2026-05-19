@@ -283,6 +283,10 @@ export default function (app: BackupServerAPI): Plugin {
           return
         }
         const body = (req.body ?? {}) as { tag?: unknown }
+        if ('tag' in body && typeof body.tag !== 'string') {
+          res.status(400).json({ error: 'tag must be a string' })
+          return
+        }
         const requestedTag =
           (typeof body.tag === 'string' ? body.tag : undefined) ??
           currentSettings?.imageTag ??
