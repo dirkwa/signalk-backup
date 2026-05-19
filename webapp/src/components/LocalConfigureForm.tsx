@@ -73,10 +73,16 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
         setSelected('')
       }
 
-      // Auto-select the largest free-bytes candidate if the user hasn't
-      // picked one — saves a click in the common single-USB case.
+      // Auto-select the largest free-bytes *writable* candidate if the
+      // user hasn't picked one — saves a click in the common single-
+      // USB case. Skip read-only / not-writable entries (CD-ROM, root-
+      // owned dirs) so we never auto-pick something that would fail at
+      // submit time. `writable === undefined` is treated as "unknown,
+      // include" for compatibility with older engines that didn't ship
+      // the field.
       if ((!selected || !stillPresent) && candidates.length > 0) {
-        const [best] = [...candidates].sort((a, b) => (b.freeBytes ?? 0) - (a.freeBytes ?? 0))
+        const eligible = candidates.filter((c) => c.writable !== false)
+        const [best] = [...eligible].sort((a, b) => (b.freeBytes ?? 0) - (a.freeBytes ?? 0))
         if (best) setSelected(best.containerPath)
       }
     } catch (err) {
@@ -141,14 +147,27 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
             }}
           >
             <option value="">— select —</option>
-            {(candidates ?? []).map((c) => (
-              <option key={c.containerPath} value={c.containerPath}>
-                {c.hostPath}
-                {c.freeBytes != null && c.totalBytes != null
+            {(candidates ?? []).map((c) => {
+              const sizeSuffix =
+                c.freeBytes != null && c.totalBytes != null
                   ? ` (${formatBytes(c.freeBytes)} free of ${formatBytes(c.totalBytes)})`
-                  : ''}
-              </option>
-            ))}
+                  : ''
+              // Non-writable entries (CD-ROMs, root-owned dirs) stay in
+              // the list so the user can see they exist but can't be
+              // picked. The suffix names *why* so the user can act.
+              const writableSuffix = c.writable === false ? ' — not writable' : ''
+              return (
+                <option
+                  key={c.containerPath}
+                  value={c.containerPath}
+                  disabled={c.writable === false}
+                >
+                  {c.hostPath}
+                  {sizeSuffix}
+                  {writableSuffix}
+                </option>
+              )
+            })}
           </Input>
           <Button
             color="secondary"

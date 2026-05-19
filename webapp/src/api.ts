@@ -128,6 +128,12 @@ export interface LocalCandidate {
   freeBytes: number | null
   /** Total bytes on the destination's filesystem; null when unknown. */
   totalBytes: number | null
+  /**
+   * True when the backup engine can write to this directory. Optional
+   * for backwards compatibility with engine versions that predate the
+   * field (treat missing as "unknown — let the user try and see").
+   */
+  writable?: boolean
 }
 
 export interface LocalStatus {
