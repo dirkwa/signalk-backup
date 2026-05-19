@@ -14,11 +14,7 @@ export const PLUGIN_VERSION = (() => {
   return raw.version
 })()
 
-/**
- * `imageTag: 'auto'` (the schema default) means "track this plugin's own
- * version". Anything else is passed through verbatim, including the legacy
- * `'latest'` and any user-pinned semver.
- */
+// 'auto' resolves to PLUGIN_VERSION so the container tracks plugin upgrades; other tags pass through.
 export function resolveImageTag(tag: string): string {
   return tag === 'auto' ? PLUGIN_VERSION : tag
 }
