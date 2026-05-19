@@ -25,8 +25,16 @@ interface Props {
 // null when the host path isn't under one of the bind-mounted prefixes
 // so the caller can surface a clear validation error instead of letting
 // the server reject it later.
+//
+// Defense in depth against path traversal: any `..` segment short-
+// circuits to null. The backend re-validates with realpath, but
+// catching it here gives a clearer UI error and avoids round-tripping
+// obvious junk to the server.
 function hostPathToContainerPath(hostPath: string): string | null {
   const normalized = hostPath.trim().replace(/\/+$/, '')
+  if (normalized.split('/').some((segment) => segment === '..')) {
+    return null
+  }
   if (normalized === '/media' || normalized.startsWith('/media/')) {
     return '/host-media' + normalized.slice('/media'.length)
   }
