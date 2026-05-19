@@ -20,11 +20,36 @@ interface Props {
   onError: (msg: string) => void
 }
 
+// Map a host-side path the user types (e.g. `/media/dirk/USB-SSD`) to
+// the equivalent container-side path the backup engine sees. Returns
+// null when the host path isn't under one of the bind-mounted prefixes
+// so the caller can surface a clear validation error instead of letting
+// the server reject it later.
+//
+// Defense in depth against path traversal: any `..` segment short-
+// circuits to null. The backend re-validates with realpath, but
+// catching it here gives a clearer UI error and avoids round-tripping
+// obvious junk to the server.
+function hostPathToContainerPath(hostPath: string): string | null {
+  const normalized = hostPath.trim().replace(/\/+$/, '')
+  if (normalized.split('/').some((segment) => segment === '..')) {
+    return null
+  }
+  if (normalized === '/media' || normalized.startsWith('/media/')) {
+    return '/host-media' + normalized.slice('/media'.length)
+  }
+  if (normalized === '/mnt' || normalized.startsWith('/mnt/')) {
+    return '/host-mnt' + normalized.slice('/mnt'.length)
+  }
+  return null
+}
+
 /**
  * Picker for the `local` destination. Lists candidates from
- * /cloud/local/discover (subdirs of /host-media + /host-mnt) and lets
- * the user pick one. A manual `containerPath` text field is the escape
- * hatch for paths that don't show up in discovery.
+ * /cloud/local/discover (subdirectories of `/media` and `/mnt` on the
+ * host, surfaced inside the container under `/host-media` and
+ * `/host-mnt`) and lets the user pick one. A manual host-path text
+ * field is the escape hatch for paths that don't show up in discovery.
  */
 export function LocalConfigureForm({ onConfigured, onError }: Props) {
   const [candidates, setCandidates] = useState<LocalCandidate[] | null>(null)
@@ -40,18 +65,27 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
       setCandidates(candidates)
 
       // If the user had picked a path that's no longer in the discovery
-      // list (drive unplugged, mount removed), drop the stale selection
-      // so the dropdown doesn't keep showing it as "—" or letting them
-      // submit a vanished path.
-      const stillPresent = selected && candidates.some((c) => c.containerPath === selected)
+      // list (drive unplugged, mount removed) OR whose writability has
+      // since flipped to false (ownership changed under us), drop the
+      // stale selection so the dropdown doesn't keep showing it as the
+      // active choice. `writable === undefined` is treated as allowed
+      // for compatibility with older engines that didn't ship the field.
+      const stillPresent =
+        selected && candidates.some((c) => c.containerPath === selected && c.writable !== false)
       if (selected && !stillPresent) {
         setSelected('')
       }
 
-      // Auto-select the largest free-bytes candidate if the user hasn't
-      // picked one — saves a click in the common single-USB case.
+      // Auto-select the largest free-bytes *writable* candidate if the
+      // user hasn't picked one — saves a click in the common single-
+      // USB case. Skip read-only / not-writable entries (CD-ROM, root-
+      // owned dirs) so we never auto-pick something that would fail at
+      // submit time. `writable === undefined` is treated as "unknown,
+      // include" for compatibility with older engines that didn't ship
+      // the field.
       if ((!selected || !stillPresent) && candidates.length > 0) {
-        const [best] = [...candidates].sort((a, b) => (b.freeBytes ?? 0) - (a.freeBytes ?? 0))
+        const eligible = candidates.filter((c) => c.writable !== false)
+        const [best] = [...eligible].sort((a, b) => (b.freeBytes ?? 0) - (a.freeBytes ?? 0))
         if (best) setSelected(best.containerPath)
       }
     } catch (err) {
@@ -86,11 +120,19 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
   }
 
   const onUseManual = (): void => {
-    if (!manualPath.trim()) return
-    // Manual path must already be the container-side path (under
-    // /host-media or /host-mnt). Server validates and rejects with 400
-    // if not.
-    void submit(manualPath.trim(), manualPath.trim())
+    const hostPath = manualPath.trim()
+    if (!hostPath) return
+    const containerPath = hostPathToContainerPath(hostPath)
+    if (!containerPath) {
+      onError(
+        `Path must live under /media or /mnt — those are the only host ` +
+          `locations the backup engine can see. Plug a USB drive in (it ` +
+          `auto-mounts under /media), or have the system administrator ` +
+          `mount your destination under /mnt.`
+      )
+      return
+    }
+    void submit(containerPath, hostPath)
   }
 
   return (
@@ -108,14 +150,27 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
             }}
           >
             <option value="">— select —</option>
-            {(candidates ?? []).map((c) => (
-              <option key={c.containerPath} value={c.containerPath}>
-                {c.hostPath}
-                {c.freeBytes != null && c.totalBytes != null
+            {(candidates ?? []).map((c) => {
+              const sizeSuffix =
+                c.freeBytes != null && c.totalBytes != null
                   ? ` (${formatBytes(c.freeBytes)} free of ${formatBytes(c.totalBytes)})`
-                  : ''}
-              </option>
-            ))}
+                  : ''
+              // Non-writable entries (CD-ROMs, root-owned dirs) stay in
+              // the list so the user can see they exist but can't be
+              // picked. The suffix names *why* so the user can act.
+              const writableSuffix = c.writable === false ? ' — not writable' : ''
+              return (
+                <option
+                  key={c.containerPath}
+                  value={c.containerPath}
+                  disabled={c.writable === false}
+                >
+                  {c.hostPath}
+                  {sizeSuffix}
+                  {writableSuffix}
+                </option>
+              )
+            })}
           </Input>
           <Button
             color="secondary"
@@ -149,12 +204,12 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
       <hr className="my-3" />
 
       <FormGroup>
-        <Label for="manual-path">Or type a container path manually</Label>
+        <Label for="manual-path">Or type a host path manually</Label>
         <div className="d-flex gap-2">
           <Input
             id="manual-path"
             type="text"
-            placeholder="/host-media/USB-SSD or /host-mnt/nfs-share"
+            placeholder="/media/dirk/USB-SSD or /mnt/nfs-share"
             value={manualPath}
             disabled={submitting}
             onChange={(e) => {
@@ -170,8 +225,10 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
           </Button>
         </div>
         <small className="text-muted">
-          Path must live under <code>/host-media</code> or <code>/host-mnt</code> — those are the
-          baseline mounts the backup engine sees from the host.
+          Enter the path the way you see it on the host — <code>/media/...</code> for plugged-in USB
+          drives, <code>/mnt/...</code> for network shares mounted by the system. Inside the backup
+          engine these are remapped to <code>/host-media/...</code> and <code>/host-mnt/...</code>,
+          but you don&apos;t need to type that yourself.
         </small>
       </FormGroup>
     </div>
