@@ -65,10 +65,13 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
       setCandidates(candidates)
 
       // If the user had picked a path that's no longer in the discovery
-      // list (drive unplugged, mount removed), drop the stale selection
-      // so the dropdown doesn't keep showing it as "—" or letting them
-      // submit a vanished path.
-      const stillPresent = selected && candidates.some((c) => c.containerPath === selected)
+      // list (drive unplugged, mount removed) OR whose writability has
+      // since flipped to false (ownership changed under us), drop the
+      // stale selection so the dropdown doesn't keep showing it as the
+      // active choice. `writable === undefined` is treated as allowed
+      // for compatibility with older engines that didn't ship the field.
+      const stillPresent =
+        selected && candidates.some((c) => c.containerPath === selected && c.writable !== false)
       if (selected && !stillPresent) {
         setSelected('')
       }
@@ -223,8 +226,9 @@ export function LocalConfigureForm({ onConfigured, onError }: Props) {
         </div>
         <small className="text-muted">
           Enter the path the way you see it on the host — <code>/media/...</code> for plugged-in USB
-          drives, <code>/mnt/...</code> for network shares mounted by the system. The backup engine
-          sees the same locations.
+          drives, <code>/mnt/...</code> for network shares mounted by the system. Inside the backup
+          engine these are remapped to <code>/host-media/...</code> and <code>/host-mnt/...</code>,
+          but you don&apos;t need to type that yourself.
         </small>
       </FormGroup>
     </div>
