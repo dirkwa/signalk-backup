@@ -185,14 +185,12 @@ describe('GrafanaExporter', () => {
       const result = await exporter.exportAll(stagingDir)
 
       expect(result.pluginId).toBe('signalk-grafana')
-      // 3 "tables" reported: db, dashboards, provisioning.
       const tables = Object.fromEntries(result.tables.map((t) => [t.table, t]))
       expect(tables['grafana.db']).toBeDefined()
       expect(tables['grafana.db'].bytes).toBeGreaterThan(0)
       expect(tables['dashboards'].shardsWritten).toBe(2)
       expect(tables['provisioning'].shardsWritten).toBe(1)
 
-      // Files on disk match what the mock served.
       const dbContent = await readFile(join(stagingDir, 'grafana.db'))
       expect(dbContent.toString('utf-8')).toBe('FAKE_SQLITE_DB')
 
@@ -230,7 +228,6 @@ describe('GrafanaExporter', () => {
     })
 
     it('wipes stale files from the previous cycle (deleted dashboards do not linger)', async () => {
-      // Cycle 1: two dashboards exist
       const cycle1 = makeMockFetch({
         dashboards: [
           {
@@ -252,10 +249,7 @@ describe('GrafanaExporter', () => {
         expect.arrayContaining(['keep.json', 'delete-me.json'])
       )
 
-      // Cycle 2: user deleted "delete-me.json" in Grafana between cycles.
-      // The manifest only lists "keep.json" now. The stale file must
-      // disappear from the staging tree too — otherwise kopia would
-      // keep snapshotting it forever.
+      // Cycle 2: "delete-me.json" gone from manifest; the staging tree must follow or kopia keeps it forever.
       const cycle2 = makeMockFetch({
         dashboards: [
           {

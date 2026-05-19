@@ -1,9 +1,4 @@
-// Grafana exporter — pulls a consistent SQLite checkpoint plus dashboard
-// JSONs and provisioning YAMLs via signalk-grafana's /api/full-export
-// routes. Mirrors the QuestDB pattern (HTTP over loopback, atomic
-// temp-file-then-rename writes) so kopia picks up the staged files
-// on the next snapshot. signalk-grafana >= the version that adds
-// `/api/full-export/{db,dashboards,provisioning}` is required.
+// Mirrors the QuestDB exporter: pulls signalk-grafana's /api/full-export/{db,dashboards,provisioning} over loopback and stages into kopia's snapshot tree.
 
 import { mkdir, rename, rm, unlink } from 'node:fs/promises'
 import { createWriteStream, existsSync } from 'node:fs'
@@ -53,9 +48,7 @@ export class GrafanaExporter implements DatabaseExporter {
   }
 
   async detect(): Promise<boolean> {
-    // The dashboards manifest endpoint is the cheapest probe: GET, no
-    // container exec, always 200 on a running signalk-grafana even when
-    // /var/lib/grafana is empty (returns `{ dashboards: [] }`).
+    // Dashboards manifest is the cheapest probe — GET, no container exec, 200 even when /var/lib/grafana is empty.
     try {
       const url = `${this.baseUrl}/plugins/${this.pluginId}/api/full-export/dashboards`
       const res = await this.fetchImpl(url, { signal: AbortSignal.timeout(5_000) })
@@ -75,9 +68,7 @@ export class GrafanaExporter implements DatabaseExporter {
     const exports: TableExport[] = []
     let totalBytes = 0
 
-    // SQLite DB — a single file with no internal structure we expose.
-    // Use the existing TableExport shape (one "table" with one "shard")
-    // so the orchestrator's totals line up with QuestDB-style reports.
+    // Use TableExport-as-single-shard so totals line up with QuestDB reports.
     try {
       const dbBytes = await this.exportDb(stagingDir)
       exports.push({
@@ -92,8 +83,6 @@ export class GrafanaExporter implements DatabaseExporter {
       this.log(`db export failed: ${errMsg(err)}`)
     }
 
-    // Dashboards — flat JSON files. Stage each under
-    // `<stagingDir>/dashboards/<name>`.
     try {
       const bytes = await this.exportDashboards(stagingDir)
       exports.push({
@@ -108,7 +97,6 @@ export class GrafanaExporter implements DatabaseExporter {
       this.log(`dashboards export failed: ${errMsg(err)}`)
     }
 
-    // Provisioning — nested YAML tree under `provisioning/`.
     try {
       const bytes = await this.exportProvisioning(stagingDir)
       exports.push({
@@ -137,8 +125,8 @@ export class GrafanaExporter implements DatabaseExporter {
 
   private async exportDb(stagingDir: string): Promise<number> {
     const finalPath = join(stagingDir, 'grafana.db')
-    const partialPath = `${finalPath}.partial`
-    if (existsSync(partialPath)) await unlink(partialPath).catch(() => undefined)
+    // Drop the prior-cycle file first so a mid-cycle failure leaves no stale grafana.db beside fresh dashboards.
+    if (existsSync(finalPath)) await unlink(finalPath).catch(() => undefined)
 
     const url = `${this.baseUrl}/plugins/${this.pluginId}/api/full-export/db`
     const res = await this.fetchImpl(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
@@ -148,8 +136,7 @@ export class GrafanaExporter implements DatabaseExporter {
     if (!res.body) {
       throw new Error('db response body is empty')
     }
-    const bytes = await streamToFile(res.body, partialPath)
-    await rename(partialPath, finalPath)
+    const bytes = await atomicWrite(res.body, finalPath)
     this.log(`wrote grafana.db (${bytes} bytes)`)
     return bytes
   }
@@ -169,10 +156,7 @@ export class GrafanaExporter implements DatabaseExporter {
     }
 
     const dashboardsDir = join(stagingDir, 'dashboards')
-    // Reset the staging dir before each export. Dashboards can be
-    // renamed or deleted in Grafana between cycles, and re-fetching
-    // doesn't remove the old files — without this, kopia would keep
-    // snapshotting orphaned JSON forever.
+    // Reset so dashboards deleted in Grafana don't linger in kopia forever.
     await this.resetStagingDir(dashboardsDir)
 
     let totalBytes = 0
@@ -204,11 +188,7 @@ export class GrafanaExporter implements DatabaseExporter {
     if (!res.ok || !res.body) {
       throw new Error(`HTTP ${res.status}`)
     }
-    const finalPath = join(dashboardsDir, entry.name)
-    const partialPath = `${finalPath}.partial`
-    const bytes = await streamToFile(res.body, partialPath)
-    await rename(partialPath, finalPath)
-    return bytes
+    return atomicWrite(res.body, join(dashboardsDir, entry.name))
   }
 
   private async exportProvisioning(stagingDir: string): Promise<{
@@ -226,8 +206,7 @@ export class GrafanaExporter implements DatabaseExporter {
     }
 
     const provisioningDir = join(stagingDir, 'provisioning')
-    // Reset for the same reason as dashboards: stale YAMLs from a
-    // previous Grafana provisioning state would otherwise persist.
+    // Reset so removed YAMLs don't linger in kopia forever.
     await this.resetStagingDir(provisioningDir)
 
     let totalBytes = 0
@@ -273,41 +252,33 @@ export class GrafanaExporter implements DatabaseExporter {
     }
     const finalPath = join(provisioningDir, entry.relPath)
     await mkdir(dirname(finalPath), { recursive: true })
-    const partialPath = `${finalPath}.partial`
-    const bytes = await streamToFile(res.body, partialPath)
-    await rename(partialPath, finalPath)
-    return bytes
+    return atomicWrite(res.body, finalPath)
   }
 
-  // Wipe and recreate a per-section staging dir so the next export's
-  // file set fully replaces the previous one. Without this, files
-  // that disappeared between cycles (deleted dashboards, removed
-  // datasource YAMLs) would linger in the staging tree and travel
-  // forward in every kopia snapshot indefinitely.
+  // Errors propagate so a failed reset reports as failed-section instead of emitting a half-fresh half-stale tree.
   private async resetStagingDir(root: string): Promise<void> {
-    try {
-      await rm(root, { recursive: true, force: true })
-      await mkdir(root, { recursive: true })
-    } catch {
-      // Best-effort; fall back to whatever directory state already
-      // exists. Per-file rename-into-place will still produce a
-      // consistent result for the files we do fetch this cycle.
-    }
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
   }
 }
 
-// Stream a fetch body into a file. Pulled out as a helper because the
-// `Readable.fromWeb` adapter dance + pipeline pattern repeats across
-// every fetch we do.
-async function streamToFile(body: ReadableStream<Uint8Array>, path: string): Promise<number> {
+// Failed writes unlink the partial so half-written data can't slip into the next snapshot.
+async function atomicWrite(body: ReadableStream<Uint8Array>, finalPath: string): Promise<number> {
+  const partialPath = `${finalPath}.partial`
   const nodeStream = Readable.fromWeb(body as Parameters<typeof Readable.fromWeb>[0])
-  const sink = createWriteStream(path)
+  const sink = createWriteStream(partialPath)
   let bytes = 0
   nodeStream.on('data', (chunk: Buffer) => {
     bytes += chunk.length
   })
-  await pipeline(nodeStream, sink)
-  return bytes
+  try {
+    await pipeline(nodeStream, sink)
+    await rename(partialPath, finalPath)
+    return bytes
+  } catch (err) {
+    await unlink(partialPath).catch(() => undefined)
+    throw err
+  }
 }
 
 function errMsg(err: unknown): string {

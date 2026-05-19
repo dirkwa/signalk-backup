@@ -25,11 +25,7 @@ export interface ExportOrchestratorOptions {
   signalkBaseUrl: string
   /** Optional debug logger. */
   log?: (msg: string) => void
-  /**
-   * Per-source enable flags. An exporter whose flag is `false` is
-   * skipped without running `detect()`. Missing key = enabled (legacy
-   * callers that didn't pass `enabled` keep working).
-   */
+  // Missing key = enabled, so legacy callers that don't pass `enabled` keep working.
   enabled?: { questdb?: boolean; grafana?: boolean }
 }
 
