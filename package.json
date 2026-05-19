@@ -6,8 +6,8 @@
   "type": "module",
   "signalk-plugin-enabled-by-default": true,
   "scripts": {
-    "format": "prettier --write 'src/**/*.ts' 'test/**/*.ts' 'webapp/**/*.{ts,tsx,html}' && eslint --fix 'src/**/*.ts' 'test/**/*.ts' 'webapp/**/*.{ts,tsx}'",
-    "lint": "eslint 'src/**/*.ts' 'test/**/*.ts' 'webapp/**/*.{ts,tsx}'",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"webapp/**/*.{ts,tsx,html}\" && eslint --fix \"src/**/*.ts\" \"test/**/*.ts\" \"webapp/**/*.{ts,tsx}\"",
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\" \"webapp/**/*.{ts,tsx}\"",
     "typecheck:webapp": "tsc -p tsconfig.webapp.json",
     "build:plugin": "tsc",
     "build:webapp": "vite build",

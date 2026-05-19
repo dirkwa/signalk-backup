@@ -5,12 +5,13 @@
  * exporter pulls data via the source plugin's HTTP route on the SignalK
  * server itself — no container exec or shared filesystems involved.
  *
- * Currently supports QuestDB only. InfluxDB is intentionally out of
- * scope (see design doc).
+ * Supports QuestDB and Grafana. InfluxDB is intentionally out of scope
+ * (see design doc).
  */
 
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { GrafanaExporter } from './grafana.js'
 import { QuestDBExporter } from './questdb.js'
 import type { DatabaseExporter, ExportResult } from './types.js'
 
@@ -24,6 +25,8 @@ export interface ExportOrchestratorOptions {
   signalkBaseUrl: string
   /** Optional debug logger. */
   log?: (msg: string) => void
+  // Missing key = disabled, matching SCHEMA_DEFAULTS.databaseExport.
+  enabled?: { questdb?: boolean; grafana?: boolean }
 }
 
 /**
@@ -40,12 +43,24 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
   const stagingRoot = join(opts.signalkConfigRoot, 'plugin-config-data', PLUGIN_ID, STAGING_SUBDIR)
   await mkdir(stagingRoot, { recursive: true })
 
-  const exporters: DatabaseExporter[] = [
-    new QuestDBExporter({
-      signalkBaseUrl: opts.signalkBaseUrl,
-      log: opts.log
-    })
-  ]
+  const enabled = opts.enabled ?? {}
+  const exporters: DatabaseExporter[] = []
+  if (enabled.questdb === true) {
+    exporters.push(
+      new QuestDBExporter({
+        signalkBaseUrl: opts.signalkBaseUrl,
+        log: opts.log
+      })
+    )
+  }
+  if (enabled.grafana === true) {
+    exporters.push(
+      new GrafanaExporter({
+        signalkBaseUrl: opts.signalkBaseUrl,
+        log: opts.log
+      })
+    )
+  }
 
   const results: ExportResult[] = []
   for (const exporter of exporters) {
@@ -71,4 +86,5 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
 }
 
 export type { DatabaseExporter, ExportResult, TableExport } from './types.js'
+export { GrafanaExporter } from './grafana.js'
 export { QuestDBExporter } from './questdb.js'
