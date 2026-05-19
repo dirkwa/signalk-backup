@@ -18,7 +18,7 @@ describe('SCHEMA_DEFAULTS merge', () => {
     const config: Partial<Config> = {}
     const merged: Config = { ...SCHEMA_DEFAULTS, ...config }
     expect(merged.managedContainer).toBe(true)
-    expect(merged.imageTag).toBe('latest')
+    expect(merged.imageTag).toBe('auto')
     expect(merged.externalUrl).toBe('')
     expect(merged.databaseExport.questdb).toBe(false)
     expect(merged.databaseExport.intervalMinutes).toBe(60)
@@ -32,7 +32,7 @@ describe('SCHEMA_DEFAULTS merge', () => {
     const merged: Config = { ...SCHEMA_DEFAULTS, ...config }
     expect(merged.managedContainer).toBe(false)
     expect(merged.externalUrl).toBe('http://server:3001')
-    expect(merged.imageTag).toBe('latest') // unchanged from defaults
+    expect(merged.imageTag).toBe('auto') // unchanged from defaults (resolves to plugin version at runtime)
   })
 
   it('SCHEMA_DEFAULTS is itself a valid Config (defends against renames)', () => {

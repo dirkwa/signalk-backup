@@ -7,6 +7,10 @@ describe('config schema', () => {
     expect(Value.Check(ConfigSchema, SCHEMA_DEFAULTS)).toBe(true)
   })
 
+  it('default imageTag is "auto" so it tracks the plugin version', () => {
+    expect(SCHEMA_DEFAULTS.imageTag).toBe('auto')
+  })
+
   it('rejects out-of-range databaseExport.intervalMinutes', () => {
     expect(
       Value.Check(ConfigSchema, {
