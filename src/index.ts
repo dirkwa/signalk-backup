@@ -13,6 +13,7 @@ import {
   VolumeIssue
 } from './types.js'
 import { ConfigSchema, Config, SCHEMA_DEFAULTS } from './config/schema.js'
+import { resolveImageTag } from './config/image-tag.js'
 import { runAllExports } from './database-export/index.js'
 
 const BACKUP_IMAGE = 'ghcr.io/dirkwa/signalk-backup-server'
@@ -246,7 +247,7 @@ export default function (app: BackupServerAPI): Plugin {
           }
         }
         if (!containerImage) {
-          containerImage = `${BACKUP_IMAGE}:${currentSettings?.imageTag ?? 'latest'}`
+          containerImage = `${BACKUP_IMAGE}:${resolveImageTag(currentSettings?.imageTag ?? 'auto')}`
         }
 
         res.json({
@@ -282,14 +283,15 @@ export default function (app: BackupServerAPI): Plugin {
           return
         }
         const body = (req.body ?? {}) as { tag?: unknown }
-        const tag =
+        const requestedTag =
           (typeof body.tag === 'string' ? body.tag : undefined) ??
           currentSettings?.imageTag ??
-          'latest'
-        if (!SAFE_TAG.test(tag)) {
+          'auto'
+        if (!SAFE_TAG.test(requestedTag)) {
           res.status(400).json({ error: 'Invalid tag format' })
           return
         }
+        const tag = resolveImageTag(requestedTag)
 
         try {
           app.setPluginStatus(`Pulling ${BACKUP_IMAGE}:${tag}...`)
@@ -308,8 +310,11 @@ export default function (app: BackupServerAPI): Plugin {
             return
           }
 
+          // Persist the *requested* tag, not the resolved one. If the user
+          // (or the UI) sent "auto", saving the resolved version would silently
+          // pin them to that version across the next plugin upgrade.
           if (currentSettings) {
-            currentSettings.imageTag = tag
+            currentSettings.imageTag = requestedTag
             await new Promise<void>((resolve) => {
               app.savePluginOptions({ ...currentSettings }, (err: NodeJS.ErrnoException | null) => {
                 if (err) {
@@ -497,10 +502,11 @@ export default function (app: BackupServerAPI): Plugin {
       app.setPluginError(`Invalid imageTag "${settings.imageTag}"`)
       return
     }
+    const resolvedTag = resolveImageTag(settings.imageTag)
 
     try {
-      app.setPluginStatus(`Starting ${BACKUP_IMAGE}:${settings.imageTag}...`)
-      await containers.ensureRunning(CONTAINER_NAME, buildContainerConfig(settings.imageTag), {
+      app.setPluginStatus(`Starting ${BACKUP_IMAGE}:${resolvedTag}...`)
+      await containers.ensureRunning(CONTAINER_NAME, buildContainerConfig(resolvedTag), {
         onVolumeIssue
       })
 
@@ -512,7 +518,7 @@ export default function (app: BackupServerAPI): Plugin {
           pluginId: PLUGIN_ID,
           containerName: CONTAINER_NAME,
           image: BACKUP_IMAGE,
-          currentTag: () => currentSettings?.imageTag ?? settings.imageTag,
+          currentTag: () => resolveImageTag(currentSettings?.imageTag ?? settings.imageTag),
           versionSource: containers.updates.sources.githubReleases('dirkwa/signalk-backup-server')
         })
       } catch (err) {

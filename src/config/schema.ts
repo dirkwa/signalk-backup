@@ -19,9 +19,11 @@ export const ConfigSchema = Type.Object({
       'Disable to point at an external backup-server instance via "External URL".'
   }),
   imageTag: Type.String({
-    default: 'latest',
+    default: 'auto',
     title: 'Container image tag',
-    description: 'Pin to a specific version (e.g. "0.1.0") or use a floating tag (e.g. "latest").'
+    description:
+      '"auto" (default) tracks the plugin version, so upgrading the plugin upgrades the container. ' +
+      'Pin to a specific version (e.g. "0.4.0") or use a floating tag (e.g. "latest") to override.'
   }),
   externalUrl: Type.String({
     default: '',
@@ -55,7 +57,7 @@ export type Config = Static<typeof ConfigSchema>
  */
 export const SCHEMA_DEFAULTS: Config = {
   managedContainer: true,
-  imageTag: 'latest',
+  imageTag: 'auto',
   externalUrl: '',
   databaseExport: {
     questdb: false,
