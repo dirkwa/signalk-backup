@@ -5,8 +5,8 @@
  * exporter pulls data via the source plugin's HTTP route on the SignalK
  * server itself — no container exec or shared filesystems involved.
  *
- * Currently supports QuestDB only. InfluxDB is intentionally out of
- * scope (see design doc).
+ * Supports QuestDB and Grafana. InfluxDB is intentionally out of scope
+ * (see design doc).
  */
 
 import { mkdir } from 'node:fs/promises'

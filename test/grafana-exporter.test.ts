@@ -13,6 +13,34 @@ function urlOf(input: FetchInput): string {
   return input.url
 }
 
+async function walkRecursive(root: string): Promise<string[]> {
+  const out: string[] = []
+  const entries = await readdir(root, { withFileTypes: true })
+  for (const ent of entries) {
+    const full = join(root, ent.name)
+    out.push(full)
+    if (ent.isDirectory()) {
+      out.push(...(await walkRecursive(full)))
+    }
+  }
+  return out
+}
+
+function decodeUntilStable(url: string): string {
+  let prev = url
+  for (let i = 0; i < 5; i++) {
+    let next: string
+    try {
+      next = decodeURIComponent(prev)
+    } catch {
+      return prev
+    }
+    if (next === prev) return next
+    prev = next
+  }
+  return prev
+}
+
 // Builds a fetch mock that answers the four export endpoints
 // (dashboards manifest, dashboards file, provisioning manifest,
 // provisioning file, db). Each fixture is a small in-memory blob; the
@@ -218,13 +246,8 @@ describe('GrafanaExporter', () => {
       const exporter = new GrafanaExporter({ fetch: fetchImpl })
       await exporter.exportAll(stagingDir)
 
-      const dashboardEntries = await readdir(join(stagingDir, 'dashboards'))
-      for (const name of dashboardEntries) {
-        expect(name.endsWith('.partial')).toBe(false)
-      }
-      const top = await readdir(stagingDir)
-      for (const name of top) {
-        expect(name.endsWith('.partial')).toBe(false)
+      for (const path of await walkRecursive(stagingDir)) {
+        expect(path.endsWith('.partial')).toBe(false)
       }
     })
 
@@ -301,6 +324,7 @@ describe('GrafanaExporter', () => {
       const result = await exporter.exportAll(stagingDir)
       const dashboardsTable = result.tables.find((t) => t.table === 'dashboards')
       expect(dashboardsTable?.shardsWritten).toBe(1)
+      expect(dashboardsTable?.shardsSkipped).toBe(1)
       const present = await readdir(join(stagingDir, 'dashboards'))
       expect(present).toContain('good.json')
       expect(present).not.toContain('no-sha.json')
@@ -356,12 +380,14 @@ describe('GrafanaExporter', () => {
       const provTable = result.tables.find((t) => t.table === 'provisioning')
       expect(provTable?.shardsWritten).toBe(1)
       expect(provTable?.shardsSkipped).toBe(1)
-      // No request should have leaked the traversal entry through, in
-      // either raw or url-encoded form.
+      // No request should have leaked the traversal entry through,
+      // even via mixed or double percent-encoding. Decode each URL
+      // recursively until stable, then check for any `..` segment.
       for (const url of requested) {
-        expect(url).not.toMatch(/\.\.\/etc\/passwd/)
-        expect(url.toLowerCase()).not.toContain('%2e%2e')
-        expect(url).not.toContain('evil.yaml')
+        const decoded = decodeUntilStable(url)
+        expect(decoded).not.toMatch(/(^|\/)\.\.(\/|$)/)
+        expect(decoded).not.toContain('/etc/passwd')
+        expect(decoded).not.toContain('evil.yaml')
       }
       // Confirm no traversal happened — there should be no /etc/passwd
       // anywhere outside the staging tree, and the only provisioning
