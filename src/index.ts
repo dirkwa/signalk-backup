@@ -198,9 +198,18 @@ export default function (app: BackupServerAPI): Plugin {
       app.debug('Starting signalk-backup')
       // CRITICAL: Signal K does not seed schema defaults into the runtime
       // config — when the plugin is auto-enabled (or enabled without
-      // saving the form), `config` is `{}`. Merge defaults so callers can
-      // rely on every field being present.
-      const merged: Config = { ...SCHEMA_DEFAULTS, ...config }
+      // saving the form), `config` is `{}`. Deep-merge defaults so callers
+      // can rely on every field being present, including nested fields
+      // added in later versions (e.g. databaseExport.grafana for users
+      // upgrading from a config saved before G2).
+      const merged: Config = {
+        ...SCHEMA_DEFAULTS,
+        ...config,
+        databaseExport: {
+          ...SCHEMA_DEFAULTS.databaseExport,
+          ...(config.databaseExport ?? {})
+        }
+      }
       currentSettings = merged
       void asyncStart(merged).catch((err: unknown) => {
         app.setPluginError(`Startup failed: ${errMsg(err)}`)
