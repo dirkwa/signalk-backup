@@ -310,9 +310,7 @@ export default function (app: BackupServerAPI): Plugin {
             return
           }
 
-          // Persist the *requested* tag, not the resolved one. If the user
-          // (or the UI) sent "auto", saving the resolved version would silently
-          // pin them to that version across the next plugin upgrade.
+          // Persist requestedTag not resolved tag: saving "auto" preserves auto-tracking across upgrades.
           if (currentSettings) {
             currentSettings.imageTag = requestedTag
             await new Promise<void>((resolve) => {

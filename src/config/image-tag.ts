@@ -1,10 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// The backup-server image is published in lockstep with this plugin
-// (CI tags `vX.Y.Z` produce `ghcr.io/.../signalk-backup-server:X.Y.Z`),
-// so reading our own package.json version is the authoritative source
-// for the "auto" tag.
+// CI publishes signalk-backup-server:X.Y.Z in lockstep with this plugin's package.json version.
 export const PLUGIN_VERSION = (() => {
   const pkgPath = fileURLToPath(new URL('../../package.json', import.meta.url))
   const raw = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version?: unknown }
