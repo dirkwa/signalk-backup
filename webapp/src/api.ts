@@ -221,6 +221,8 @@ export interface RetentionConfig {
 export interface DbExportConfig {
   /** Whether the QuestDB exporter runs on the interval. */
   questdb: boolean
+  /** Whether the Grafana exporter runs on the interval. */
+  grafana: boolean
   /** Interval between exports in minutes (5 - 1440). */
   intervalMinutes: number
 }
