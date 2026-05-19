@@ -37,9 +37,10 @@ export const ConfigSchema = Type.Object({
   databaseExport: Type.Object(
     {
       questdb: Type.Boolean({ default: false }),
+      grafana: Type.Boolean({ default: false }),
       intervalMinutes: Type.Number({ default: 60, minimum: 5, maximum: 1440 })
     },
-    { default: { questdb: false, intervalMinutes: 60 } }
+    { default: { questdb: false, grafana: false, intervalMinutes: 60 } }
   )
 })
 
@@ -61,6 +62,7 @@ export const SCHEMA_DEFAULTS: Config = {
   externalUrl: '',
   databaseExport: {
     questdb: false,
+    grafana: false,
     intervalMinutes: 60
   }
 }

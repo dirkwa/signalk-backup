@@ -11,6 +11,7 @@
 
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { GrafanaExporter } from './grafana.js'
 import { QuestDBExporter } from './questdb.js'
 import type { DatabaseExporter, ExportResult } from './types.js'
 
@@ -24,6 +25,12 @@ export interface ExportOrchestratorOptions {
   signalkBaseUrl: string
   /** Optional debug logger. */
   log?: (msg: string) => void
+  /**
+   * Per-source enable flags. An exporter whose flag is `false` is
+   * skipped without running `detect()`. Missing key = enabled (legacy
+   * callers that didn't pass `enabled` keep working).
+   */
+  enabled?: { questdb?: boolean; grafana?: boolean }
 }
 
 /**
@@ -40,12 +47,24 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
   const stagingRoot = join(opts.signalkConfigRoot, 'plugin-config-data', PLUGIN_ID, STAGING_SUBDIR)
   await mkdir(stagingRoot, { recursive: true })
 
-  const exporters: DatabaseExporter[] = [
-    new QuestDBExporter({
-      signalkBaseUrl: opts.signalkBaseUrl,
-      log: opts.log
-    })
-  ]
+  const enabled = opts.enabled ?? {}
+  const exporters: DatabaseExporter[] = []
+  if (enabled.questdb !== false) {
+    exporters.push(
+      new QuestDBExporter({
+        signalkBaseUrl: opts.signalkBaseUrl,
+        log: opts.log
+      })
+    )
+  }
+  if (enabled.grafana !== false) {
+    exporters.push(
+      new GrafanaExporter({
+        signalkBaseUrl: opts.signalkBaseUrl,
+        log: opts.log
+      })
+    )
+  }
 
   const results: ExportResult[] = []
   for (const exporter of exporters) {
@@ -71,4 +90,5 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
 }
 
 export type { DatabaseExporter, ExportResult, TableExport } from './types.js'
+export { GrafanaExporter } from './grafana.js'
 export { QuestDBExporter } from './questdb.js'
