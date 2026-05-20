@@ -283,7 +283,7 @@ async function runRestore(ctx: RestoreContext): Promise<void> {
       throw new Error(`upstream ${upstream.status}: ${text.slice(0, 200)}`)
     }
 
-    const nodeStream = Readable.fromWeb(upstream.body as never)
+    const nodeStream = Readable.fromWeb(upstream.body)
 
     if (ctx.isDir) {
       state.status = {
@@ -292,11 +292,12 @@ async function runRestore(ctx: RestoreContext): Promise<void> {
         progress: 60,
         statusMessage: 'Extracting ZIP…'
       }
-      // The server returns a ZIP for directory sources. Extract into the
-      // final target dir — unzipper handles nested entries, file modes,
-      // and creates parents as needed.
       await mkdir(ctx.target.absoluteTarget, { recursive: true })
-      await pipeline(nodeStream, unzipper.Extract({ path: ctx.target.absoluteTarget }))
+      // Per-entry path-traversal guard: unzipper.Extract uses a string
+      // prefix check that doesn't catch ../ sequences inside an entry
+      // name. Parse the ZIP and resolve each entry against the target;
+      // reject anything that escapes via path.relative starting with '..'.
+      await extractZipSafely(nodeStream, ctx.target.absoluteTarget)
     } else {
       state.status = {
         ...state.status,
@@ -360,6 +361,49 @@ async function safeStat(p: string): Promise<{ mtime: Date; size: number } | null
   } catch {
     return null
   }
+}
+
+// Resolve a ZIP entry path against the target directory. Returns the
+// absolute destination when the entry is contained inside targetDir,
+// or null when the entry name is empty, contains '..' segments, or
+// the resolved path otherwise escapes via path.relative. We reject
+// '..' outright (rather than silently dropping it) so a malicious
+// snapshot can't smuggle data into unintended locations under the
+// target — even if the resolved path stays inside the root, the
+// shape of the entry path is suspicious enough to refuse.
+export function resolveZipEntryPath(entryPath: string, targetDir: string): string | null {
+  const resolvedTarget = path.resolve(targetDir)
+  const parts = entryPath.split(/[/\\]/).filter((p) => p.length > 0)
+  if (parts.length === 0) return null
+  if (parts.some((p) => p === '..')) return null
+  const dest = path.resolve(resolvedTarget, parts.join('/'))
+  const rel = path.relative(resolvedTarget, dest)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return null
+  return dest
+}
+
+// Per-entry path validation while extracting the server's directory
+// ZIP. unzipper.Extract uses a string-prefix check that doesn't catch
+// `../` inside entry names; consume entries through Parse so we can
+// resolve each path ourselves and reject anything that escapes.
+async function extractZipSafely(input: Readable, targetDir: string): Promise<void> {
+  const resolvedTarget = path.resolve(targetDir)
+  await pipeline(input, unzipper.Parse(), async (parsed: AsyncIterable<unzipper.Entry>) => {
+    for await (const entry of parsed) {
+      const dest = resolveZipEntryPath(entry.path, resolvedTarget)
+      if (!dest) {
+        entry.autodrain()
+        throw new Error(`ZIP entry "${entry.path}" escapes the target directory`)
+      }
+      if (entry.type === 'Directory') {
+        await mkdir(dest, { recursive: true })
+        entry.autodrain()
+      } else {
+        await mkdir(path.dirname(dest), { recursive: true })
+        await pipeline(entry, createWriteStream(dest))
+      }
+    }
+  })
 }
 
 function errMsg(err: unknown): string {

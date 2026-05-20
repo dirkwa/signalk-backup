@@ -688,18 +688,22 @@ export function formatBytes(bytes: number): string {
  *  SignalK config root mounted at containerPath; any path it reports
  *  starting with that prefix actually lives at hostPath/... on the
  *  host. Returns the path unchanged when no mapping is provided or
- *  when the path is outside the mapped prefix. */
+ *  when the path is outside the mapped prefix. Trailing slashes on
+ *  either input are normalised away first so /data/ vs /data don't
+ *  produce divergent results. */
 export function toHostPath(
   serverPath: string | undefined,
   mapping: PluginStatus['pathMapping'] | undefined
 ): string | undefined {
   if (!serverPath || !mapping) return serverPath
-  const { containerPath, hostPath } = mapping
-  if (serverPath === containerPath) return hostPath
-  const prefix = containerPath.endsWith('/') ? containerPath : containerPath + '/'
+  const stripTrailingSlash = (p: string): string => p.replace(/\/+$/, '') || '/'
+  const container = stripTrailingSlash(mapping.containerPath)
+  const host = stripTrailingSlash(mapping.hostPath)
+  const candidate = stripTrailingSlash(serverPath)
+  if (candidate === container) return host
+  const prefix = container === '/' ? '/' : container + '/'
   if (serverPath.startsWith(prefix)) {
-    const hostBase = hostPath.endsWith('/') ? hostPath.slice(0, -1) : hostPath
-    return hostBase + '/' + serverPath.slice(prefix.length)
+    return host + '/' + serverPath.slice(prefix.length)
   }
   return serverPath
 }

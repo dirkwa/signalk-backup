@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveHostTarget } from '../src/restore-host-write.js'
+import { resolveHostTarget, resolveZipEntryPath } from '../src/restore-host-write.js'
 import path from 'node:path'
 
 describe('resolveHostTarget', () => {
@@ -41,5 +41,40 @@ describe('resolveHostTarget', () => {
   it('builds a sibling safety path next to the target', () => {
     const r = resolveHostTarget('/tmp/restored.json', false, 'package.json')
     expect(r.safetyPath).toMatch(/^\/tmp\/restored\.json\.partial-restore-backup-/)
+  })
+})
+
+describe('resolveZipEntryPath', () => {
+  const target = '/tmp/restore-target'
+
+  it('accepts a plain entry under the target', () => {
+    expect(resolveZipEntryPath('sub/a.txt', target)).toBe('/tmp/restore-target/sub/a.txt')
+  })
+
+  it('rejects entries with ".." segments anywhere (the classic path-traversal vector)', () => {
+    expect(resolveZipEntryPath('../etc/passwd', target)).toBeNull()
+    expect(resolveZipEntryPath('sub/../../etc/passwd', target)).toBeNull()
+    // Even a "safe" rewrite still rejects — the shape of the entry
+    // is suspicious enough to refuse outright. A legitimate snapshot
+    // never produces these names.
+    expect(resolveZipEntryPath('sub/../etc', target)).toBeNull()
+  })
+
+  it('accepts an entry whose name starts with "/" (the leading slash is dropped during split)', () => {
+    // /etc/passwd splits to ['etc', 'passwd'] (the leading empty
+    // segment from the slash is filtered) and lands under target —
+    // a legitimate inside-target write.
+    expect(resolveZipEntryPath('/etc/passwd', target)).toBe('/tmp/restore-target/etc/passwd')
+  })
+
+  it('rejects empty entry paths', () => {
+    expect(resolveZipEntryPath('', target)).toBeNull()
+    expect(resolveZipEntryPath('//', target)).toBeNull()
+  })
+
+  it('strips Windows-style backslash separators', () => {
+    // Defensive: a malicious ZIP could embed backslash separators.
+    expect(resolveZipEntryPath('a\\b\\c.txt', target)).toBe('/tmp/restore-target/a/b/c.txt')
+    expect(resolveZipEntryPath('..\\..\\etc\\passwd', target)).toBeNull()
   })
 })
