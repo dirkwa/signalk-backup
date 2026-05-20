@@ -35,10 +35,15 @@ const SAFE_TAG = /^[a-zA-Z0-9._-]+$/
  * container name `signalk-backup-server`. See:
  *   signalk-container/doc/plugin-developer-guide.md §"Resource Limits"
  */
+// Cloud sync to Google Drive / SMB runs rclone with 8 parallel transfers
+// alongside kopia; observed RSS during a real sync climbs well past
+// 256 MB and the container gets OOM-killed. 1 GB gives comfortable
+// headroom for the worst-case rclone+kopia path while still being a
+// modest ask on a Pi-class host.
 const DEFAULT_RESOURCES: ContainerResourceLimits = {
   cpus: 1,
-  memory: '256m',
-  memorySwap: '256m',
+  memory: '1g',
+  memorySwap: '1g',
   pidsLimit: 100
 }
 
@@ -118,7 +123,9 @@ export default function (app: BackupServerAPI): Plugin {
   let currentSettings: Config | null = null
   let containerAddress: string | null = null
   let dbExportTimer: NodeJS.Timeout | null = null
-  let dbExportInFlight = false
+  // In-flight tick handle so concurrent callers (scheduler + manual
+  // backup) coalesce onto the same export rather than racing.
+  let dbExportInFlight: Promise<void> | null = null
 
   const buildContainerConfig = (tag: string): ContainerConfig => ({
     image: BACKUP_IMAGE,
@@ -191,9 +198,18 @@ export default function (app: BackupServerAPI): Plugin {
       app.debug('Starting signalk-backup')
       // CRITICAL: Signal K does not seed schema defaults into the runtime
       // config — when the plugin is auto-enabled (or enabled without
-      // saving the form), `config` is `{}`. Merge defaults so callers can
-      // rely on every field being present.
-      const merged: Config = { ...SCHEMA_DEFAULTS, ...config }
+      // saving the form), `config` is `{}`. Deep-merge defaults so callers
+      // can rely on every field being present, including nested fields
+      // added in later versions (e.g. databaseExport.grafana for users
+      // upgrading from a config saved before G2).
+      const merged: Config = {
+        ...SCHEMA_DEFAULTS,
+        ...config,
+        databaseExport: {
+          ...SCHEMA_DEFAULTS.databaseExport,
+          ...(config.databaseExport ?? {})
+        }
+      }
       currentSettings = merged
       void asyncStart(merged).catch((err: unknown) => {
         app.setPluginError(`Startup failed: ${errMsg(err)}`)
@@ -446,6 +462,22 @@ export default function (app: BackupServerAPI): Plugin {
         }
       })
 
+      // Manual-backup interceptor — runs DB exports synchronously
+      // before forwarding to the backup-server's snapshot endpoint, so
+      // the resulting kopia snapshot captures fresh DB state. Without
+      // this, a manual backup would snapshot whatever stale (or empty)
+      // files the last scheduler tick left in the staging dir.
+      router.post('/api/backups', async (_req: Request, _res: Response, next) => {
+        const dbCfg = currentSettings?.databaseExport
+        if (dbCfg?.questdb || dbCfg?.grafana) {
+          // runDbExportTick logs and swallows failures internally — a
+          // backup with stale DB state is better than no backup, so we
+          // always continue to the proxy regardless of export outcome.
+          await runDbExportTick()
+        }
+        next()
+      })
+
       // Proxy /api/* to the backup-server. Registered LAST so the
       // explicit /api/update/{check,apply} and /api/cloud/smb/discover
       // above match first. containerAddress includes the scheme so
@@ -584,35 +616,39 @@ export default function (app: BackupServerAPI): Plugin {
     }
   }
 
-  async function runDbExportTick(): Promise<void> {
-    // Coalesce: if a previous tick is still running (e.g. a slow large
-    // table on a Pi), skip this one entirely rather than queuing.
-    if (dbExportInFlight) {
-      app.debug('Database export: previous tick still running, skipping')
-      return
-    }
-    dbExportInFlight = true
-    try {
-      const dbCfg = currentSettings?.databaseExport ?? SCHEMA_DEFAULTS.databaseExport
-      const results = await runAllExports({
-        signalkConfigRoot: resolveSignalkConfigRoot(),
-        signalkBaseUrl: resolveSignalkBaseUrl(),
-        log: (msg) => {
-          app.debug(msg)
-        },
-        enabled: { questdb: dbCfg.questdb, grafana: dbCfg.grafana }
+  // Pure body — the coalescing/promise-tracking happens in
+  // runDbExportTick() so callers always get a single shared promise.
+  async function runDbExportOnce(): Promise<void> {
+    const dbCfg = currentSettings?.databaseExport ?? SCHEMA_DEFAULTS.databaseExport
+    const results = await runAllExports({
+      signalkConfigRoot: resolveSignalkConfigRoot(),
+      signalkBaseUrl: resolveSignalkBaseUrl(),
+      log: (msg) => {
+        app.debug(msg)
+      },
+      enabled: { questdb: dbCfg.questdb, grafana: dbCfg.grafana }
+    })
+    const totalTables = results.reduce((acc, r) => acc + r.tables.length, 0)
+    const totalBytes = results.reduce((acc, r) => acc + r.totalBytes, 0)
+    app.debug(
+      `Database export tick: ${results.length} sources, ` +
+        `${totalTables} tables, ${totalBytes} bytes`
+    )
+  }
+
+  // Coalesce concurrent callers — a manual backup hitting this while
+  // the scheduler tick is still in-flight should await the same export,
+  // not skip out and snapshot mid-write.
+  function runDbExportTick(): Promise<void> {
+    if (dbExportInFlight) return dbExportInFlight
+    dbExportInFlight = runDbExportOnce()
+      .catch((err: unknown) => {
+        app.error(`Database export tick failed: ${errMsg(err)}`)
       })
-      const totalTables = results.reduce((acc, r) => acc + r.tables.length, 0)
-      const totalBytes = results.reduce((acc, r) => acc + r.totalBytes, 0)
-      app.debug(
-        `Database export tick: ${results.length} sources, ` +
-          `${totalTables} tables, ${totalBytes} bytes`
-      )
-    } catch (err) {
-      app.error(`Database export tick failed: ${errMsg(err)}`)
-    } finally {
-      dbExportInFlight = false
-    }
+      .finally(() => {
+        dbExportInFlight = null
+      })
+    return dbExportInFlight
   }
 
   /**

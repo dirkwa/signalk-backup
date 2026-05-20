@@ -674,6 +674,21 @@ function DbExportCard() {
     }
   }
 
+  const onToggleGrafana = async (next: boolean): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      await api.dbExportConfigSet({ grafana: next })
+      cfg.refresh()
+      setSuccess(next ? 'Grafana export enabled' : 'Grafana export disabled')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const onSaveInterval = async (): Promise<void> => {
     const parsed = parseInt(intervalDraft, 10)
     if (!Number.isFinite(parsed) || parsed < 5 || parsed > 1440) {
@@ -728,6 +743,20 @@ function DbExportCard() {
               />
               <Label for="db-export-questdb" check>
                 Export QuestDB tables to backup
+              </Label>
+            </FormGroup>
+
+            <FormGroup switch className="mb-3">
+              <Input
+                id="db-export-grafana"
+                type="switch"
+                role="switch"
+                checked={data.grafana}
+                disabled={busy}
+                onChange={(e) => void onToggleGrafana(e.target.checked)}
+              />
+              <Label for="db-export-grafana" check>
+                Export Grafana dashboards, provisioning, and SQLite checkpoint
               </Label>
             </FormGroup>
 
