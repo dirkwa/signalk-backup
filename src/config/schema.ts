@@ -1,12 +1,6 @@
 import { Type, Static } from '@sinclair/typebox'
 
-// Schema for the SignalK Admin UI plugin config form — deployment
-// knobs only. databaseExport.* is intentionally NOT in here: the
-// webapp's Settings tab owns that UI, and RJSF can't reliably hide a
-// required-int field even with ui:widget='hidden' (validation chrome
-// leaks). savePluginOptions still round-trips the persisted value
-// because SignalK's options store accepts any JSON, not just
-// schema-described keys.
+// databaseExport.* deliberately omitted — webapp Settings owns that UI; RJSF leaks required-int chrome.
 export const ConfigSchema = Type.Object({
   managedContainer: Type.Boolean({
     default: true,
@@ -31,9 +25,7 @@ export const ConfigSchema = Type.Object({
   })
 })
 
-// databaseExport lives off-schema (see ConfigSchema comment). Still
-// part of the persisted Config at runtime — Signal K's options store
-// round-trips arbitrary keys, the schema just drives the form.
+// Off-schema but persisted at runtime; SignalK's options store round-trips arbitrary keys.
 export interface DatabaseExportConfig {
   questdb: boolean
   grafana: boolean
@@ -45,11 +37,7 @@ export type Config = Static<typeof ConfigSchema> & {
   databaseExport: DatabaseExportConfig
 }
 
-// Materialised defaults — Signal K only uses the schema's `default` fields
-// to seed the Admin UI form, NOT to inject defaults into the runtime config
-// object passed to plugin.start(). Spread SCHEMA_DEFAULTS in start() so
-// every field is present even when start() is called with `{}`.
-// See AGENTS.md §"Plugin-specific gotchas".
+// SignalK uses schema `default` only to seed the form, not the runtime config — spread these in start(). See AGENTS.md gotchas.
 export const SCHEMA_DEFAULTS: Config = {
   managedContainer: true,
   imageTag: 'auto',
