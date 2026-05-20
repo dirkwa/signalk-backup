@@ -63,7 +63,22 @@ export function PartialRestoreModal({
     setSubmitting(true)
     setError(null)
     try {
-      await api.restorePartial(backup.id, buildInput(confirmOverwrite))
+      // Custom-mode goes through the plugin's host-write route so the
+      // restore can land anywhere the SignalK process can write,
+      // including paths outside the container's view (/tmp, /media/*).
+      // Original-mode stays on the container path because it
+      // overwrites the live SignalK tree.
+      if (mode === 'custom') {
+        await api.restorePartialHost({
+          backupId: backup.id,
+          sourcePath,
+          customPath: customPath.trim(),
+          isDir: sourceEntry.isDir,
+          confirmOverwrite
+        })
+      } else {
+        await api.restorePartial(backup.id, buildInput(confirmOverwrite))
+      }
       onSubmitted()
     } catch (err) {
       if (err instanceof PartialRestoreConflictError) {
@@ -120,7 +135,7 @@ export function PartialRestoreModal({
                   setConflict(null)
                 }}
               />{' '}
-              Custom path (must resolve under SignalK config root)
+              Custom path (anywhere the SignalK user can write)
             </Label>
           </FormGroup>
           {mode === 'custom' && (
@@ -133,11 +148,12 @@ export function PartialRestoreModal({
                   setCustomPath(e.target.value)
                   setConflict(null)
                 }}
-                placeholder="e.g. restored/settings.json"
+                placeholder="e.g. /tmp/restored or /media/usb/backups/"
               />
               <small className="text-muted">
-                Relative or absolute. Absolute paths must stay inside the SignalK config root; the
-                server rejects anything that resolves outside.
+                Relative or absolute. The plugin writes locally under the SignalK process's
+                permissions, so anywhere your user can write works — including /tmp, /media/usb/…,
+                or under your home directory. Add a trailing slash to land inside as a directory.
               </small>
             </FormGroup>
           )}

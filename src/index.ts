@@ -16,6 +16,7 @@ import { ConfigSchema, Config, SCHEMA_DEFAULTS } from './config/schema.js'
 import { resolveImageTag } from './config/image-tag.js'
 import { runAllExports } from './database-export/index.js'
 import { registerStagingRoutes } from './database-export/staging-routes.js'
+import { registerHostRestoreRoutes } from './restore-host-write.js'
 
 const BACKUP_IMAGE = 'ghcr.io/dirkwa/signalk-backup-server'
 const CONTAINER_NAME = 'signalk-backup-server'
@@ -467,6 +468,18 @@ export default function (app: BackupServerAPI): Plugin {
       // backups) go through the backup-server's /download-subtree.
       registerStagingRoutes(router, {
         getStagingRoot: () => path.join(app.getDataDirPath(), 'database-exports'),
+        log: (msg) => {
+          app.debug(msg)
+        }
+      })
+
+      // Host-side restore for "Custom path" targets — bypasses the
+      // backup-server container's filesystem so the user can land
+      // restored files anywhere the SignalK process can write.
+      // Original-location restores still go through the proxy to the
+      // server's restore-partial route.
+      registerHostRestoreRoutes(router, {
+        getUpstreamBase: () => containerAddress,
         log: (msg) => {
           app.debug(msg)
         }

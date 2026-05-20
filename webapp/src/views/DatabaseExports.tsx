@@ -11,19 +11,42 @@ import {
   Spinner,
   Table
 } from 'reactstrap'
-import { api, formatBytes, formatDate, type BackupMetadata } from '../api'
+import { api, formatBytes, formatDate, type BackupMetadata, type RestoreState } from '../api'
 import { useApi } from '../useApi'
 import { BackupBrowser } from '../components/BackupBrowser'
+import {
+  ACTIVE_HOST_STATES,
+  ACTIVE_PARTIAL_STATES,
+  PartialRestoreBanner
+} from '../components/PartialRestoreBanner'
 
 // Path inside every snapshot where the plugin's DB-export tick lands
 // its parquet shards. The browser picker is scoped to this so the user
 // doesn't have to navigate the whole tree just to grab DB shards.
 const STAGING_SUBPATH = 'plugin-config-data/signalk-backup/database-exports'
 
+// Full-restore in-progress markers — same set Backups.tsx uses. A full
+// restore from any view should also disable partial/host actions here,
+// so the user gets a clear "wait" rather than a server-side 409.
+const ACTIVE_RESTORE_STATES: ReadonlySet<RestoreState> = new Set<RestoreState>([
+  'preparing',
+  'extracting',
+  'installing',
+  'restarting',
+  'verifying',
+  'rolling_back'
+])
+
 export function DatabaseExports() {
   const staging = useApi(() => api.listStaging(), { intervalMs: 30000 })
   const backups = useApi(() => api.listBackups(), { intervalMs: 60000 })
   const pluginStatus = useApi(() => api.pluginStatus(), { intervalMs: 60000 })
+  // Partial + host restore are reachable from this view via the
+  // BackupBrowser modal, so we surface the same status banners and
+  // restore-lock here as on the Backups view.
+  const restore = useApi(() => api.restoreStatus(), { intervalMs: 2000 })
+  const restorePartial = useApi(() => api.restorePartialStatus(), { intervalMs: 2000 })
+  const restorePartialHost = useApi(() => api.restorePartialHostStatus(), { intervalMs: 2000 })
   const [browseBackup, setBrowseBackup] = useState<BackupMetadata | null>(null)
   const [selectedBackupId, setSelectedBackupId] = useState<string>('')
 
@@ -35,9 +58,52 @@ export function DatabaseExports() {
     if (b) setBrowseBackup(b)
   }
 
+  const onResetRestorePartial = async (): Promise<void> => {
+    try {
+      await api.resetRestorePartialState()
+      restorePartial.refresh()
+    } catch (err) {
+      window.alert(`Reset failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  const onResetRestorePartialHost = async (): Promise<void> => {
+    try {
+      await api.resetRestorePartialHostState()
+      restorePartialHost.refresh()
+    } catch (err) {
+      window.alert(`Reset failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  const restoreActive = restore.data ? ACTIVE_RESTORE_STATES.has(restore.data.state) : false
+  const restorePartialActive = restorePartial.data
+    ? ACTIVE_PARTIAL_STATES.has(restorePartial.data.state)
+    : false
+  const restorePartialHostActive = restorePartialHost.data
+    ? ACTIVE_HOST_STATES.has(restorePartialHost.data.state)
+    : false
+  const restoreLocked = restoreActive || restorePartialActive || restorePartialHostActive
+
   return (
     <>
       <h2 className="mb-3">Database exports</h2>
+      {restorePartial.data && (
+        <PartialRestoreBanner
+          status={restorePartial.data}
+          pathMapping={pluginStatus.data?.pathMapping}
+          onReset={() => void onResetRestorePartial()}
+        />
+      )}
+      {restorePartialHost.data && (
+        <PartialRestoreBanner
+          status={restorePartialHost.data}
+          title="Host restore"
+          pathMapping={pluginStatus.data?.pathMapping}
+          mapTargetPath={false}
+          onReset={() => void onResetRestorePartialHost()}
+        />
+      )}
       <p className="text-muted">
         QuestDB, Grafana and signalk-database exports staged by the plugin. The top card extracts
         the database-exports subtree from any historical backup without pulling the whole snapshot;
@@ -170,8 +236,15 @@ export function DatabaseExports() {
           isOpen
           initialPath={STAGING_SUBPATH}
           pathMapping={pluginStatus.data?.pathMapping}
+          restoreLocked={restoreLocked}
           onClose={() => {
             setBrowseBackup(null)
+          }}
+          onRestoreStarted={() => {
+            // Modal kicks off either flow depending on targetMode;
+            // refresh both to surface whichever banner becomes active.
+            restorePartial.refresh()
+            restorePartialHost.refresh()
           }}
         />
       )}

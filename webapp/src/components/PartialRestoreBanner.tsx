@@ -1,6 +1,7 @@
 import { Alert, Button, Progress } from 'reactstrap'
 import {
   toHostPath,
+  type HostRestoreStatus,
   type PartialRestoreState,
   type PartialRestoreStatus,
   type PluginStatus
@@ -14,22 +15,49 @@ const ACTIVE_PARTIAL_STATES: ReadonlySet<PartialRestoreState> = new Set<PartialR
   'rolling_back'
 ])
 
+const ACTIVE_HOST_STATES = new Set<HostRestoreStatus['state']>([
+  'preparing',
+  'streaming',
+  'extracting',
+  'rolling_back'
+])
+
 interface Props {
-  status: PartialRestoreStatus
-  /** Container→host path mapping from /status; undefined in external
-   *  mode. When supplied, targetPath under the mapped prefix is shown
-   *  as its host equivalent instead of the container path. */
+  status: PartialRestoreStatus | HostRestoreStatus
+  // Set "Host restore" for the host-side banner so it's distinguishable when both fire.
+  title?: string
+  // From /status — used to translate container paths to host paths.
   pathMapping?: PluginStatus['pathMapping']
+  // Set false when targetPath is already a host path (the host-restore
+  // writer writes locally, so the status already carries the host
+  // path) — running it through toHostPath would mis-remap if the
+  // chosen path happens to share the container prefix.
+  mapTargetPath?: boolean
   onReset: () => void
 }
 
-export function PartialRestoreBanner({ status, pathMapping, onReset }: Props) {
+function isActive(state: string): boolean {
+  return (
+    ACTIVE_PARTIAL_STATES.has(state as PartialRestoreState) ||
+    ACTIVE_HOST_STATES.has(state as HostRestoreStatus['state'])
+  )
+}
+
+export function PartialRestoreBanner({
+  status,
+  title,
+  pathMapping,
+  mapTargetPath = true,
+  onReset
+}: Props) {
   if (status.state === 'idle') return null
 
-  const active = ACTIVE_PARTIAL_STATES.has(status.state)
+  const active = isActive(status.state)
   const failed = status.state === 'failed' || status.state === 'rolled_back'
   const completed = status.state === 'completed'
-  const hostTargetPath = toHostPath(status.targetPath, pathMapping)
+  const hostTargetPath = mapTargetPath
+    ? toHostPath(status.targetPath, pathMapping)
+    : status.targetPath
 
   return (
     <Alert
@@ -38,7 +66,9 @@ export function PartialRestoreBanner({ status, pathMapping, onReset }: Props) {
     >
       <div className="d-flex justify-content-between align-items-start">
         <div>
-          <strong>Partial restore: {status.state}</strong>
+          <strong>
+            {title ?? 'Partial restore'}: {status.state}
+          </strong>
           <div className="small">{status.statusMessage}</div>
           {status.sourcePath && (
             <div className="small text-muted">
@@ -74,4 +104,4 @@ export function PartialRestoreBanner({ status, pathMapping, onReset }: Props) {
   )
 }
 
-export { ACTIVE_PARTIAL_STATES }
+export { ACTIVE_PARTIAL_STATES, ACTIVE_HOST_STATES }
