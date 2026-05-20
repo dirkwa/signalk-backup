@@ -3,13 +3,15 @@ import { Container, Nav, NavItem, NavLink } from 'reactstrap'
 import { Dashboard } from './views/Dashboard'
 import { Backups } from './views/Backups'
 import { Cloud } from './views/Cloud'
+import { DatabaseExports } from './views/DatabaseExports'
 import { Settings } from './views/Settings'
 
-type Route = 'dashboard' | 'backups' | 'cloud' | 'settings'
+type Route = 'dashboard' | 'backups' | 'database-exports' | 'cloud' | 'settings'
 
 const ROUTES: { id: Route; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'backups', label: 'Backups' },
+  { id: 'database-exports', label: 'Database exports' },
   { id: 'cloud', label: 'Cloud sync' },
   { id: 'settings', label: 'Settings' }
 ]
@@ -68,6 +70,7 @@ export function App() {
 
       {route === 'dashboard' && <Dashboard />}
       {route === 'backups' && <Backups />}
+      {route === 'database-exports' && <DatabaseExports />}
       {route === 'cloud' && <Cloud />}
       {route === 'settings' && <Settings />}
     </Container>
