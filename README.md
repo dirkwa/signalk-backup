@@ -10,6 +10,7 @@ The plugin is a thin shell: it asks [signalk-container](https://github.com/dirkw
 - **Cloud sync to Google Drive** — optional, opt-in. Uses rclone with `drive.file` scope (the app only sees files it created)
 - **Scheduled backups** — hourly / daily / weekly / on-startup tiers, each with independent retention
 - **Restore with safety backup** — every restore creates a snapshot of the current state first, so a botched restore can be rolled back automatically
+- **Database export pipeline** — opt-in exporters for [signalk-questdb](https://github.com/dirkwa/signalk-questdb), [signalk-grafana](https://github.com/dirkwa/signalk-grafana), and [signalk-database](https://github.com/dirkwa/signalk-database) periodically write consistent snapshots (parquet, SQLite checkpoint, provisioning YAML) to a staging dir that kopia includes in every snapshot. Live DB files are excluded from filesystem-level backup to avoid torn-write hazards; the export side is how DB state actually gets backed up. Manual backups run pending exports synchronously first.
 - **First-run safe default** — installs with a daily local-only schedule already seeded; no surprise data egress
 - **Update detection** — checks ghcr.io for new container images via signalk-container's centralized update service
 
@@ -50,6 +51,7 @@ Most configuration lives in the **Backup Console** (open it from the redirect, o
 - Repository password (Kopia encryption key)
 - Cloud sync mode (off / manual / daily / weekly)
 - Google Drive connection (one-click OAuth via `rclone authorize drive`)
+- Database export toggles (QuestDB, Grafana, signalk-database) and export interval
 - Snapshot browser, restore wizard
 
 The SignalK Admin UI plugin panel (small) handles only deployment-level settings:
