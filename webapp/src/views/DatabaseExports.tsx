@@ -11,7 +11,7 @@ import {
   Spinner,
   Table
 } from 'reactstrap'
-import { api, formatBytes, formatDate, type BackupMetadata } from '../api'
+import { api, formatBytes, formatDate, type BackupMetadata, type RestoreState } from '../api'
 import { useApi } from '../useApi'
 import { BackupBrowser } from '../components/BackupBrowser'
 import {
@@ -25,6 +25,18 @@ import {
 // doesn't have to navigate the whole tree just to grab DB shards.
 const STAGING_SUBPATH = 'plugin-config-data/signalk-backup/database-exports'
 
+// Full-restore in-progress markers — same set Backups.tsx uses. A full
+// restore from any view should also disable partial/host actions here,
+// so the user gets a clear "wait" rather than a server-side 409.
+const ACTIVE_RESTORE_STATES: ReadonlySet<RestoreState> = new Set<RestoreState>([
+  'preparing',
+  'extracting',
+  'installing',
+  'restarting',
+  'verifying',
+  'rolling_back'
+])
+
 export function DatabaseExports() {
   const staging = useApi(() => api.listStaging(), { intervalMs: 30000 })
   const backups = useApi(() => api.listBackups(), { intervalMs: 60000 })
@@ -32,6 +44,7 @@ export function DatabaseExports() {
   // Partial + host restore are reachable from this view via the
   // BackupBrowser modal, so we surface the same status banners and
   // restore-lock here as on the Backups view.
+  const restore = useApi(() => api.restoreStatus(), { intervalMs: 2000 })
   const restorePartial = useApi(() => api.restorePartialStatus(), { intervalMs: 2000 })
   const restorePartialHost = useApi(() => api.restorePartialHostStatus(), { intervalMs: 2000 })
   const [browseBackup, setBrowseBackup] = useState<BackupMetadata | null>(null)
@@ -63,13 +76,14 @@ export function DatabaseExports() {
     }
   }
 
+  const restoreActive = restore.data ? ACTIVE_RESTORE_STATES.has(restore.data.state) : false
   const restorePartialActive = restorePartial.data
     ? ACTIVE_PARTIAL_STATES.has(restorePartial.data.state)
     : false
   const restorePartialHostActive = restorePartialHost.data
     ? ACTIVE_HOST_STATES.has(restorePartialHost.data.state)
     : false
-  const restoreLocked = restorePartialActive || restorePartialHostActive
+  const restoreLocked = restoreActive || restorePartialActive || restorePartialHostActive
 
   return (
     <>

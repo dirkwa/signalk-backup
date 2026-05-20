@@ -83,6 +83,20 @@ export function registerHostRestoreRoutes(router: IRouter, opts: RestoreHostWrit
   })
 
   router.post('/api/restore-partial-host/reset', (_req: Request, res: Response) => {
+    // Refuse to reset mid-flight — would clear the single-flight slot
+    // and let a second restore start while the first still has files
+    // open. Caller has to wait for the active restore to terminate.
+    if (state.isRunning()) {
+      res.status(409).json({
+        success: false,
+        error: {
+          code: 'RESTORE_IN_PROGRESS',
+          message: 'Cannot reset while a host-restore is in progress'
+        },
+        timestamp: new Date().toISOString()
+      })
+      return
+    }
     state.reset()
     res.json({
       success: true,
@@ -109,12 +123,36 @@ export function registerHostRestoreRoutes(router: IRouter, opts: RestoreHostWrit
       })
       return
     }
+    // Reject empty customPath up front — an empty string would silently
+    // resolve to process.cwd() and write somewhere the user didn't ask.
+    if (body.customPath.trim().length === 0) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'customPath must not be empty' },
+        timestamp: new Date().toISOString()
+      })
+      return
+    }
+    // Type-check confirmOverwrite if present: a non-boolean truthy
+    // value (e.g. the string "false" from a misbuilt form) would
+    // otherwise bypass the conflict probe and silently overwrite.
+    if ('confirmOverwrite' in body && typeof body.confirmOverwrite !== 'boolean') {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'confirmOverwrite must be a boolean when provided'
+        },
+        timestamp: new Date().toISOString()
+      })
+      return
+    }
     const { backupId, sourcePath, customPath, isDir, confirmOverwrite } = body as HostRestoreRequest
 
-    // Same sourcePath safety as the server: reject .. segments and NUL
-    // bytes. We don't run the original-mode reject-list (package.json
-    // etc.) — the explicit point of host-restore is "copy anywhere I
-    // can write", so the in-container side-effect concerns don't apply.
+    // sourcePath safety: reject `..` segments and NUL bytes. No reject-list
+    // (package.json etc.) — the explicit point of host-restore is "copy
+    // anywhere I can write", so the in-container side-effect concerns
+    // don't apply.
     if (sourcePath.includes('\0') || customPath.includes('\0')) {
       res.status(400).json({
         success: false,
@@ -145,11 +183,24 @@ export function registerHostRestoreRoutes(router: IRouter, opts: RestoreHostWrit
     }
 
     const target = resolveHostTarget(customPath, isDir, sourcePath)
+    // Reserve the single-flight slot synchronously so a concurrent
+    // POST sees state.isRunning() === true before either request hits
+    // its first await. Any early-return path below clears the slot
+    // via state.reset() so the user can retry.
+    state.status = {
+      state: 'preparing',
+      progress: 0,
+      statusMessage: 'Preparing host-restore…',
+      backupId,
+      sourcePath,
+      targetPath: target.absoluteTarget
+    }
 
     // Conflict probe — surface the existing entry so the UI shows a diff.
     if (!confirmOverwrite) {
       const existing = await safeStat(target.absoluteTarget)
       if (existing) {
+        state.reset()
         res.status(409).json({
           success: false,
           error: {
@@ -171,6 +222,7 @@ export function registerHostRestoreRoutes(router: IRouter, opts: RestoreHostWrit
 
     const base = opts.getUpstreamBase()
     if (!base) {
+      state.reset()
       res.status(503).json({
         success: false,
         error: { code: 'UPSTREAM_NOT_READY', message: 'backup-server not ready' },
@@ -179,15 +231,6 @@ export function registerHostRestoreRoutes(router: IRouter, opts: RestoreHostWrit
       return
     }
 
-    // Kick off async; respond 202. The status route is the truth.
-    state.status = {
-      state: 'preparing',
-      progress: 0,
-      statusMessage: 'Preparing host-restore…',
-      backupId,
-      sourcePath,
-      targetPath: target.absoluteTarget
-    }
     res.status(202).json({
       success: true,
       data: { started: true },
@@ -325,6 +368,10 @@ async function runRestore(ctx: RestoreContext): Promise<void> {
   } catch (err) {
     const message = errMsg(err)
     ctx.log?.(`host-restore error: ${message}`)
+    // Always scrub the partial output, even when there's no stash to
+    // swap back in. Without this, a failed download mid-way through a
+    // fresh-target restore leaves bytes lying on disk.
+    await rm(ctx.target.absoluteTarget, { recursive: true, force: true }).catch(() => undefined)
     if (safetyStashed) {
       state.status = {
         ...state.status,
@@ -332,7 +379,6 @@ async function runRestore(ctx: RestoreContext): Promise<void> {
         statusMessage: 'Rolling back…'
       }
       try {
-        await rm(ctx.target.absoluteTarget, { recursive: true, force: true })
         await rename(safetyStashed, ctx.target.absoluteTarget)
         state.status = {
           ...state.status,

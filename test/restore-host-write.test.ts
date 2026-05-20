@@ -2,22 +2,31 @@ import { describe, expect, it } from 'vitest'
 import { resolveHostTarget, resolveZipEntryPath } from '../src/restore-host-write.js'
 import path from 'node:path'
 
+// Helper: build a POSIX-style absolute path and resolve it on the
+// current platform, so tests work on both Linux (no-op) and Windows
+// (where path.resolve('/tmp') yields something like 'D:\tmp').
+const abs = (...parts: string[]): string => path.resolve('/' + parts.join('/'))
+
 describe('resolveHostTarget', () => {
   it('returns the absolute path verbatim for a no-slash custom path', () => {
-    const r = resolveHostTarget('/tmp/restored.json', false, 'package.json')
-    expect(r.absoluteTarget).toBe('/tmp/restored.json')
+    const r = resolveHostTarget(abs('tmp', 'restored.json'), false, 'package.json')
+    expect(r.absoluteTarget).toBe(abs('tmp', 'restored.json'))
   })
 
   it('appends the source basename when customPath ends with /', () => {
-    // The "into this directory" intent — /tmp/ + file `package.json`
-    // should land at /tmp/package.json, not overwrite /tmp as a file.
-    const r = resolveHostTarget('/tmp/', false, 'package.json')
-    expect(r.absoluteTarget).toBe('/tmp/package.json')
+    // The "into this directory" intent — tmp/ + file `package.json`
+    // should land at tmp/package.json, not overwrite tmp as a file.
+    const r = resolveHostTarget(abs('tmp') + path.sep, false, 'package.json')
+    expect(r.absoluteTarget).toBe(abs('tmp', 'package.json'))
   })
 
   it('appends the source basename for directory sources too', () => {
-    const r = resolveHostTarget('/media/usb/restored/', true, 'plugin-config-data/exports')
-    expect(r.absoluteTarget).toBe('/media/usb/restored/exports')
+    const r = resolveHostTarget(
+      abs('media', 'usb', 'restored') + path.sep,
+      true,
+      'plugin-config-data/exports'
+    )
+    expect(r.absoluteTarget).toBe(abs('media', 'usb', 'restored', 'exports'))
   })
 
   it('resolves a relative customPath against process.cwd()', () => {
@@ -31,24 +40,30 @@ describe('resolveHostTarget', () => {
   it('preserves absolute "/" without losing absoluteness', () => {
     // Without the explicit guard, stripping the trailing slash would
     // leave "" and treat it as a relative path. The guard keeps it
-    // absolute; the higher layer would still refuse to write to /
-    // because of fs permissions but the path itself is correct.
+    // absolute; the higher layer would still refuse to write because
+    // of fs permissions but the path itself is correct.
     const r = resolveHostTarget('/', true, 'package.json')
     expect(path.isAbsolute(r.absoluteTarget)).toBe(true)
-    expect(r.absoluteTarget).toBe('/package.json')
+    // On POSIX this is /package.json; on Windows path.resolve('/')
+    // yields something like C:\ so the basename joins natively.
+    expect(r.absoluteTarget).toBe(path.resolve('/', 'package.json'))
   })
 
   it('builds a sibling safety path next to the target', () => {
-    const r = resolveHostTarget('/tmp/restored.json', false, 'package.json')
-    expect(r.safetyPath).toMatch(/^\/tmp\/restored\.json\.partial-restore-backup-/)
+    const r = resolveHostTarget(abs('tmp', 'restored.json'), false, 'package.json')
+    expect(r.safetyPath.startsWith(abs('tmp', 'restored.json') + '.partial-restore-backup-')).toBe(
+      true
+    )
   })
 })
 
 describe('resolveZipEntryPath', () => {
-  const target = '/tmp/restore-target'
+  const target = abs('tmp', 'restore-target')
 
   it('accepts a plain entry under the target', () => {
-    expect(resolveZipEntryPath('sub/a.txt', target)).toBe('/tmp/restore-target/sub/a.txt')
+    expect(resolveZipEntryPath('sub/a.txt', target)).toBe(
+      abs('tmp', 'restore-target', 'sub', 'a.txt')
+    )
   })
 
   it('rejects entries with ".." segments anywhere (the classic path-traversal vector)', () => {
@@ -64,7 +79,9 @@ describe('resolveZipEntryPath', () => {
     // /etc/passwd splits to ['etc', 'passwd'] (the leading empty
     // segment from the slash is filtered) and lands under target —
     // a legitimate inside-target write.
-    expect(resolveZipEntryPath('/etc/passwd', target)).toBe('/tmp/restore-target/etc/passwd')
+    expect(resolveZipEntryPath('/etc/passwd', target)).toBe(
+      abs('tmp', 'restore-target', 'etc', 'passwd')
+    )
   })
 
   it('rejects empty entry paths', () => {
@@ -74,7 +91,9 @@ describe('resolveZipEntryPath', () => {
 
   it('strips Windows-style backslash separators', () => {
     // Defensive: a malicious ZIP could embed backslash separators.
-    expect(resolveZipEntryPath('a\\b\\c.txt', target)).toBe('/tmp/restore-target/a/b/c.txt')
+    expect(resolveZipEntryPath('a\\b\\c.txt', target)).toBe(
+      abs('tmp', 'restore-target', 'a', 'b', 'c.txt')
+    )
     expect(resolveZipEntryPath('..\\..\\etc\\passwd', target)).toBeNull()
   })
 })
