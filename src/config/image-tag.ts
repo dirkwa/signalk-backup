@@ -4,7 +4,6 @@
 // release on independent cadences. See AGENTS.md "Gotchas" for rationale.
 export const BACKUP_SERVER_VERSION = '0.4.0'
 
-// 'auto' resolves to the pinned server version; other tags pass through.
 export function resolveImageTag(tag: string): string {
   return tag === 'auto' ? BACKUP_SERVER_VERSION : tag
 }
