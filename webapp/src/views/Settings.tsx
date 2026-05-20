@@ -689,6 +689,21 @@ function DbExportCard() {
     }
   }
 
+  const onToggleSignalkDatabase = async (next: boolean): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      await api.dbExportConfigSet({ signalkDatabase: next })
+      cfg.refresh()
+      setSuccess(next ? 'SignalK Database export enabled' : 'SignalK Database export disabled')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const onSaveInterval = async (): Promise<void> => {
     const parsed = parseInt(intervalDraft, 10)
     if (!Number.isFinite(parsed) || parsed < 5 || parsed > 1440) {
@@ -757,6 +772,20 @@ function DbExportCard() {
               />
               <Label for="db-export-grafana" check>
                 Export Grafana dashboards, provisioning, and SQLite checkpoint
+              </Label>
+            </FormGroup>
+
+            <FormGroup switch className="mb-3">
+              <Input
+                id="db-export-signalk-database"
+                type="switch"
+                role="switch"
+                checked={data.signalkDatabase}
+                disabled={busy}
+                onChange={(e) => void onToggleSignalkDatabase(e.target.checked)}
+              />
+              <Label for="db-export-signalk-database" check>
+                Export SignalK Database plugin DBs (VACUUM INTO per plugin)
               </Label>
             </FormGroup>
 

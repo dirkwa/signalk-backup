@@ -223,6 +223,8 @@ export interface DbExportConfig {
   questdb: boolean
   /** Whether the Grafana exporter runs on the interval. */
   grafana: boolean
+  /** Whether the SignalK Database exporter runs on the interval. */
+  signalkDatabase: boolean
   /** Interval between exports in minutes (5 - 1440). */
   intervalMinutes: number
 }

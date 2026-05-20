@@ -364,23 +364,31 @@ export default function (app: BackupServerAPI): Plugin {
         const body = (req.body ?? {}) as {
           questdb?: unknown
           grafana?: unknown
+          signalkDatabase?: unknown
           intervalMinutes?: unknown
         }
 
         const questdb = typeof body.questdb === 'boolean' ? body.questdb : undefined
         const grafana = typeof body.grafana === 'boolean' ? body.grafana : undefined
+        const signalkDatabase =
+          typeof body.signalkDatabase === 'boolean' ? body.signalkDatabase : undefined
         const intervalMinutes =
           typeof body.intervalMinutes === 'number' && Number.isFinite(body.intervalMinutes)
             ? Math.round(body.intervalMinutes)
             : undefined
 
-        if (questdb === undefined && grafana === undefined && intervalMinutes === undefined) {
+        if (
+          questdb === undefined &&
+          grafana === undefined &&
+          signalkDatabase === undefined &&
+          intervalMinutes === undefined
+        ) {
           res.status(400).json({
             success: false,
             error: {
               code: 'INVALID_INPUT',
               message:
-                'Provide questdb (boolean), grafana (boolean), and/or intervalMinutes (number).'
+                'Provide questdb (boolean), grafana (boolean), signalkDatabase (boolean), and/or intervalMinutes (number).'
             },
             timestamp: new Date().toISOString()
           })
@@ -411,6 +419,7 @@ export default function (app: BackupServerAPI): Plugin {
         const next = {
           questdb: questdb ?? currentSettings.databaseExport.questdb,
           grafana: grafana ?? currentSettings.databaseExport.grafana,
+          signalkDatabase: signalkDatabase ?? currentSettings.databaseExport.signalkDatabase,
           intervalMinutes: intervalMinutes ?? currentSettings.databaseExport.intervalMinutes
         }
         currentSettings.databaseExport = next
@@ -469,7 +478,7 @@ export default function (app: BackupServerAPI): Plugin {
       // files the last scheduler tick left in the staging dir.
       router.post('/api/backups', async (_req: Request, _res: Response, next) => {
         const dbCfg = currentSettings?.databaseExport
-        if (dbCfg?.questdb || dbCfg?.grafana) {
+        if (dbCfg?.questdb || dbCfg?.grafana || dbCfg?.signalkDatabase) {
           // runDbExportTick logs and swallows failures internally — a
           // backup with stale DB state is better than no backup, so we
           // always continue to the proxy regardless of export outcome.
@@ -508,7 +517,11 @@ export default function (app: BackupServerAPI): Plugin {
         await client.waitForReady(15_000)
         app.setPluginStatus(`Connected to external backup-server at ${url}`)
         await seedFirstRunSchedule(client)
-        if (settings.databaseExport.questdb || settings.databaseExport.grafana) {
+        if (
+          settings.databaseExport.questdb ||
+          settings.databaseExport.grafana ||
+          settings.databaseExport.signalkDatabase
+        ) {
           app.setPluginStatus(
             `Connected to external backup-server. Note: database export ` +
               `requires managed-container mode and was skipped.`
@@ -597,8 +610,16 @@ export default function (app: BackupServerAPI): Plugin {
    */
   function startDbExportTimer(): void {
     stopDbExportTimer()
+    // External backup-server mode doesn't run the export pipeline — the
+    // exporters write into our local plugin-config-data tree, which the
+    // external server has no access to. Don't arm an interval that
+    // would no-op on every tick.
+    if (currentSettings?.managedContainer === false) {
+      app.debug('Database export: external mode, scheduler idle')
+      return
+    }
     const dbCfg = currentSettings?.databaseExport
-    if (!dbCfg?.questdb && !dbCfg?.grafana) {
+    if (!dbCfg?.questdb && !dbCfg?.grafana && !dbCfg?.signalkDatabase) {
       app.debug('Database export: no exporters enabled, scheduler idle')
       return
     }
@@ -619,6 +640,15 @@ export default function (app: BackupServerAPI): Plugin {
   // Pure body — the coalescing/promise-tracking happens in
   // runDbExportTick() so callers always get a single shared promise.
   async function runDbExportOnce(): Promise<void> {
+    // Belt-and-braces: the scheduler timer and the POST /api/backups
+    // interceptor both gate on managedContainer too, but this is the
+    // single chokepoint every caller flows through. In external mode
+    // there's nowhere local to stage exports for the external server
+    // to pick up, so the whole pipeline is a no-op.
+    if (currentSettings?.managedContainer === false) {
+      app.debug('Database export: skipped (external mode)')
+      return
+    }
     const dbCfg = currentSettings?.databaseExport ?? SCHEMA_DEFAULTS.databaseExport
     const results = await runAllExports({
       signalkConfigRoot: resolveSignalkConfigRoot(),
@@ -626,7 +656,11 @@ export default function (app: BackupServerAPI): Plugin {
       log: (msg) => {
         app.debug(msg)
       },
-      enabled: { questdb: dbCfg.questdb, grafana: dbCfg.grafana }
+      enabled: {
+        questdb: dbCfg.questdb,
+        grafana: dbCfg.grafana,
+        signalkDatabase: dbCfg.signalkDatabase
+      }
     })
     const totalTables = results.reduce((acc, r) => acc + r.tables.length, 0)
     const totalBytes = results.reduce((acc, r) => acc + r.totalBytes, 0)
