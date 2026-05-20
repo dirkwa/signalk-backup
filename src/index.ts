@@ -467,16 +467,13 @@ export default function (app: BackupServerAPI): Plugin {
       // the resulting kopia snapshot captures fresh DB state. Without
       // this, a manual backup would snapshot whatever stale (or empty)
       // files the last scheduler tick left in the staging dir.
-      router.post('/api/backups', async (req: Request, res: Response, next) => {
+      router.post('/api/backups', async (_req: Request, _res: Response, next) => {
         const dbCfg = currentSettings?.databaseExport
         if (dbCfg?.questdb || dbCfg?.grafana) {
-          try {
-            await runDbExportTick()
-          } catch (err) {
-            app.error(`Manual backup: DB export failed: ${errMsg(err)}`)
-            // Continue anyway — a backup with stale DB state is better
-            // than no backup. The plugin error is already surfaced.
-          }
+          // runDbExportTick logs and swallows failures internally — a
+          // backup with stale DB state is better than no backup, so we
+          // always continue to the proxy regardless of export outcome.
+          await runDbExportTick()
         }
         next()
       })
