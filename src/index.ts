@@ -610,6 +610,14 @@ export default function (app: BackupServerAPI): Plugin {
    */
   function startDbExportTimer(): void {
     stopDbExportTimer()
+    // External backup-server mode doesn't run the export pipeline — the
+    // exporters write into our local plugin-config-data tree, which the
+    // external server has no access to. Don't arm an interval that
+    // would no-op on every tick.
+    if (currentSettings?.managedContainer === false) {
+      app.debug('Database export: external mode, scheduler idle')
+      return
+    }
     const dbCfg = currentSettings?.databaseExport
     if (!dbCfg?.questdb && !dbCfg?.grafana && !dbCfg?.signalkDatabase) {
       app.debug('Database export: no exporters enabled, scheduler idle')
@@ -632,6 +640,15 @@ export default function (app: BackupServerAPI): Plugin {
   // Pure body — the coalescing/promise-tracking happens in
   // runDbExportTick() so callers always get a single shared promise.
   async function runDbExportOnce(): Promise<void> {
+    // Belt-and-braces: the scheduler timer and the POST /api/backups
+    // interceptor both gate on managedContainer too, but this is the
+    // single chokepoint every caller flows through. In external mode
+    // there's nowhere local to stage exports for the external server
+    // to pick up, so the whole pipeline is a no-op.
+    if (currentSettings?.managedContainer === false) {
+      app.debug('Database export: skipped (external mode)')
+      return
+    }
     const dbCfg = currentSettings?.databaseExport ?? SCHEMA_DEFAULTS.databaseExport
     const results = await runAllExports({
       signalkConfigRoot: resolveSignalkConfigRoot(),
