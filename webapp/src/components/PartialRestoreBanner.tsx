@@ -1,6 +1,7 @@
 import { Alert, Button, Progress } from 'reactstrap'
 import {
   toHostPath,
+  type HostRestoreStatus,
   type PartialRestoreState,
   type PartialRestoreStatus,
   type PluginStatus
@@ -14,8 +15,19 @@ const ACTIVE_PARTIAL_STATES: ReadonlySet<PartialRestoreState> = new Set<PartialR
   'rolling_back'
 ])
 
+const ACTIVE_HOST_STATES = new Set<HostRestoreStatus['state']>([
+  'preparing',
+  'streaming',
+  'extracting',
+  'rolling_back'
+])
+
 interface Props {
-  status: PartialRestoreStatus
+  status: PartialRestoreStatus | HostRestoreStatus
+  /** Title shown before the state name. Defaults to "Partial restore"
+   *  for backwards compat; the host-restore caller passes "Host
+   *  restore" so the two banners are distinguishable when both fire. */
+  title?: string
   /** Container→host path mapping from /status; undefined in external
    *  mode. When supplied, targetPath under the mapped prefix is shown
    *  as its host equivalent instead of the container path. */
@@ -23,10 +35,17 @@ interface Props {
   onReset: () => void
 }
 
-export function PartialRestoreBanner({ status, pathMapping, onReset }: Props) {
+function isActive(state: string): boolean {
+  return (
+    ACTIVE_PARTIAL_STATES.has(state as PartialRestoreState) ||
+    ACTIVE_HOST_STATES.has(state as HostRestoreStatus['state'])
+  )
+}
+
+export function PartialRestoreBanner({ status, title, pathMapping, onReset }: Props) {
   if (status.state === 'idle') return null
 
-  const active = ACTIVE_PARTIAL_STATES.has(status.state)
+  const active = isActive(status.state)
   const failed = status.state === 'failed' || status.state === 'rolled_back'
   const completed = status.state === 'completed'
   const hostTargetPath = toHostPath(status.targetPath, pathMapping)
@@ -38,7 +57,9 @@ export function PartialRestoreBanner({ status, pathMapping, onReset }: Props) {
     >
       <div className="d-flex justify-content-between align-items-start">
         <div>
-          <strong>Partial restore: {status.state}</strong>
+          <strong>
+            {title ?? 'Partial restore'}: {status.state}
+          </strong>
           <div className="small">{status.statusMessage}</div>
           {status.sourcePath && (
             <div className="small text-muted">
@@ -74,4 +95,4 @@ export function PartialRestoreBanner({ status, pathMapping, onReset }: Props) {
   )
 }
 
-export { ACTIVE_PARTIAL_STATES }
+export { ACTIVE_PARTIAL_STATES, ACTIVE_HOST_STATES }

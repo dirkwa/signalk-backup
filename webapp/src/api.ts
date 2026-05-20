@@ -116,6 +116,29 @@ export interface PartialRestoreStatus {
   targetPath?: string
 }
 
+/** Host-side restore status — distinct state names from the
+ *  server-driven flow because there's no kopia state machine; the
+ *  plugin simply streams + writes. Surfaced by the same banner. */
+export type HostRestoreState =
+  | 'idle'
+  | 'preparing'
+  | 'streaming'
+  | 'extracting'
+  | 'completed'
+  | 'failed'
+  | 'rolling_back'
+  | 'rolled_back'
+
+export interface HostRestoreStatus {
+  state: HostRestoreState
+  progress: number
+  statusMessage: string
+  error?: string
+  backupId?: string
+  sourcePath?: string
+  targetPath?: string
+}
+
 export type PartialRestoreTargetMode = 'original' | 'custom'
 
 export interface PartialRestoreInput {
@@ -452,6 +475,55 @@ export const api = {
 
   resetRestorePartialState: () =>
     request<{ message: string }>('/backups/restore-partial/reset', { method: 'POST' }),
+
+  /** Host-side custom-path restore — bypasses the backup-server
+   *  container so the user can land restored files anywhere the SignalK
+   *  process can write (e.g. /tmp, /media/usb/...). The plugin streams
+   *  from the server's /download-subtree and writes locally. Same 409
+   *  conflict semantics as restorePartial. */
+  restorePartialHost: async (input: {
+    backupId: string
+    sourcePath: string
+    customPath: string
+    isDir: boolean
+    confirmOverwrite?: boolean
+  }): Promise<{ started: boolean }> => {
+    const res = await fetch(`${API_BASE}/restore-partial-host`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input)
+    })
+    if (res.status === 409) {
+      const body = (await res.json().catch(() => null)) as ApiEnvelope<{
+        conflict?: PartialRestoreConflict
+      }> | null
+      const conflict = body?.data?.conflict
+      const code = body?.error?.code
+      if (code === 'TARGET_EXISTS' && conflict) {
+        throw new PartialRestoreConflictError(
+          body.error?.message ?? 'Target already exists',
+          conflict
+        )
+      }
+      throw new Error(
+        `restore-partial-host → 409${code ? ` [${code}]` : ''}: ${body?.error?.message ?? 'conflict'}`
+      )
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`restore-partial-host → ${res.status}: ${text.slice(0, 200)}`)
+    }
+    const body = (await res.json()) as ApiEnvelope<{ started: boolean }>
+    if (body.success === false) {
+      throw new Error(`restore-partial-host: ${body.error?.message ?? 'unknown error'}`)
+    }
+    return body.data ?? { started: true }
+  },
+
+  restorePartialHostStatus: () => request<HostRestoreStatus>('/restore-partial-host/status'),
+
+  resetRestorePartialHostState: () =>
+    request<{ message: string }>('/restore-partial-host/reset', { method: 'POST' }),
 
   // Live DB-export staging (plugin-side, not proxied). Lists files the
   // plugin wrote during its scheduled tick to
