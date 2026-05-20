@@ -267,13 +267,20 @@ export default function (app: BackupServerAPI): Plugin {
           containerImage = `${BACKUP_IMAGE}:${resolveImageTag(currentSettings?.imageTag ?? 'auto')}`
         }
 
+        // pathMapping: translate backup-server container paths back to host paths for restore banners.
+        const managed = currentSettings?.managedContainer !== false
+        const pathMapping = managed
+          ? { containerPath: SK_MOUNT, hostPath: resolveSignalkConfigRoot() }
+          : undefined
+
         res.json({
           container: {
             state: containerState,
             image: containerImage,
-            managed: currentSettings?.managedContainer !== false
+            managed
           },
-          ready: client !== null
+          ready: client !== null,
+          ...(pathMapping ? { pathMapping } : {})
         })
       })
 

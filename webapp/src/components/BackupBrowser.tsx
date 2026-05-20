@@ -14,7 +14,8 @@ import {
   formatBytes,
   type BackupMetadata,
   type BackupTreeEntry,
-  type PartialRestoreInput
+  type PartialRestoreInput,
+  type PluginStatus
 } from '../api'
 import { PartialRestoreModal } from './PartialRestoreModal'
 
@@ -31,6 +32,9 @@ interface Props {
    *  already in flight. Browse/Download stay enabled — those are
    *  read-only and the server-side global lock would 409 us anyway. */
   restoreLocked?: boolean
+  /** Forwarded to the inner PartialRestoreModal so conflict-diff
+   *  target paths render as host paths instead of container paths. */
+  pathMapping?: PluginStatus['pathMapping']
   /** Called when a partial restore is kicked off; the parent should
    *  refresh its restore-status poller so the banner appears quickly. */
   onRestoreStarted?: () => void
@@ -57,6 +61,7 @@ export function BackupBrowser({
   onClose,
   initialPath,
   restoreLocked,
+  pathMapping,
   onRestoreStarted
 }: Props) {
   const rootPath = (initialPath ?? '').replace(/^\/+|\/+$/g, '')
@@ -172,6 +177,7 @@ export function BackupBrowser({
           backup={backup}
           sourceEntry={restoreTarget}
           sourcePath={restoreTarget.fullPath}
+          pathMapping={pathMapping}
           onClose={() => {
             setRestoreTarget(null)
           }}

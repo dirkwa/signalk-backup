@@ -83,6 +83,10 @@ export function Backups() {
   // the polling rate doesn't depend on render-time decisions.
   const restore = useApi(() => api.restoreStatus(), { intervalMs: 2000 })
   const restorePartial = useApi(() => api.restorePartialStatus(), { intervalMs: 2000 })
+  // Plugin status carries the container→host path mapping the partial-
+  // restore banner uses to display the user-meaningful target path.
+  // 60s is plenty; the mapping changes only on container restart.
+  const pluginStatus = useApi(() => api.pluginStatus(), { intervalMs: 60000 })
 
   const [description, setDescription] = useState('')
   const [creating, setCreating] = useState(false)
@@ -203,6 +207,7 @@ export function Backups() {
       {restorePartial.data && (
         <PartialRestoreBanner
           status={restorePartial.data}
+          pathMapping={pluginStatus.data?.pathMapping}
           onReset={() => void onResetRestorePartial()}
         />
       )}
@@ -408,6 +413,7 @@ export function Backups() {
           backup={browseBackup}
           isOpen
           restoreLocked={actionsDisabled}
+          pathMapping={pluginStatus.data?.pathMapping}
           onClose={() => {
             setBrowseBackup(null)
           }}
