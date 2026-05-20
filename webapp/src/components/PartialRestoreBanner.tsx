@@ -24,14 +24,15 @@ const ACTIVE_HOST_STATES = new Set<HostRestoreStatus['state']>([
 
 interface Props {
   status: PartialRestoreStatus | HostRestoreStatus
-  /** Title shown before the state name. Defaults to "Partial restore"
-   *  for backwards compat; the host-restore caller passes "Host
-   *  restore" so the two banners are distinguishable when both fire. */
+  // Set "Host restore" for the host-side banner so it's distinguishable when both fire.
   title?: string
-  /** Container→host path mapping from /status; undefined in external
-   *  mode. When supplied, targetPath under the mapped prefix is shown
-   *  as its host equivalent instead of the container path. */
+  // From /status — used to translate container paths to host paths.
   pathMapping?: PluginStatus['pathMapping']
+  // Set false when targetPath is already a host path (the host-restore
+  // writer writes locally, so the status already carries the host
+  // path) — running it through toHostPath would mis-remap if the
+  // chosen path happens to share the container prefix.
+  mapTargetPath?: boolean
   onReset: () => void
 }
 
@@ -42,13 +43,21 @@ function isActive(state: string): boolean {
   )
 }
 
-export function PartialRestoreBanner({ status, title, pathMapping, onReset }: Props) {
+export function PartialRestoreBanner({
+  status,
+  title,
+  pathMapping,
+  mapTargetPath = true,
+  onReset
+}: Props) {
   if (status.state === 'idle') return null
 
   const active = isActive(status.state)
   const failed = status.state === 'failed' || status.state === 'rolled_back'
   const completed = status.state === 'completed'
-  const hostTargetPath = toHostPath(status.targetPath, pathMapping)
+  const hostTargetPath = mapTargetPath
+    ? toHostPath(status.targetPath, pathMapping)
+    : status.targetPath
 
   return (
     <Alert

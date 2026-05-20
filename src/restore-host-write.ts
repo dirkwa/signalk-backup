@@ -1,10 +1,4 @@
-// Plugin-side "restore to anywhere on the host" route. Bypasses the
-// backup-server container's filesystem entirely: the plugin streams
-// the requested sub-path from /api/backups/:id/download-subtree on the
-// upstream and writes the bytes locally under the SignalK process's
-// permissions. That lets the user pick paths the container can't see
-// (/tmp, /media/usb/..., ~/wherever), which the in-container kopia
-// restore couldn't reach.
+// Plugin-side host-write restore — bypasses the container so the user can target paths it can't see.
 
 import { createWriteStream } from 'node:fs'
 import { mkdir, rename, rm, stat } from 'node:fs/promises'
@@ -15,19 +9,12 @@ import type { IRouter, Request, Response } from 'express'
 import unzipper from 'unzipper'
 
 export interface RestoreHostWriteOptions {
-  /**
-   * Resolve the upstream base URL (e.g. `http://127.0.0.1:3010`) for
-   * the backup-server. Returns null when the container isn't ready —
-   * the route surfaces that as 503 so the UI can surface "wait and
-   * retry".
-   */
+  // Returns null while the upstream container is starting; the route 503s in that window.
   getUpstreamBase: () => string | null
-  /** Optional debug logger. */
   log?: (msg: string) => void
 }
 
-// Status of the in-flight restore. Mirrors the partial-restore-service
-// shape so the UI can poll the same way for both code paths.
+// Same shape as the partial-restore-service status so the UI banner accepts either.
 export interface HostRestoreStatus {
   state:
     | 'idle'
@@ -368,9 +355,7 @@ async function runRestore(ctx: RestoreContext): Promise<void> {
   } catch (err) {
     const message = errMsg(err)
     ctx.log?.(`host-restore error: ${message}`)
-    // Always scrub the partial output, even when there's no stash to
-    // swap back in. Without this, a failed download mid-way through a
-    // fresh-target restore leaves bytes lying on disk.
+    // Scrub partial output unconditionally — a failed fresh-target restore would otherwise leak bytes.
     await rm(ctx.target.absoluteTarget, { recursive: true, force: true }).catch(() => undefined)
     if (safetyStashed) {
       state.status = {

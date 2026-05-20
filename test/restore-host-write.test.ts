@@ -44,9 +44,12 @@ describe('resolveHostTarget', () => {
     // of fs permissions but the path itself is correct.
     const r = resolveHostTarget('/', true, 'package.json')
     expect(path.isAbsolute(r.absoluteTarget)).toBe(true)
-    // On POSIX this is /package.json; on Windows path.resolve('/')
-    // yields something like C:\ so the basename joins natively.
-    expect(r.absoluteTarget).toBe(path.resolve('/', 'package.json'))
+    // Assert the join shape rather than path.resolve('/'). resolve()
+    // pulls in the cwd's drive letter on Windows (D:\package.json
+    // vs \package.json), whereas the runtime uses path.join which
+    // doesn't — so a literal path.resolve check would diverge on the
+    // CI runner depending on which drive the test runs from.
+    expect(r.absoluteTarget).toBe(path.join(path.sep, 'package.json'))
   })
 
   it('builds a sibling safety path next to the target', () => {

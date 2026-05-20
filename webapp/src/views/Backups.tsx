@@ -235,6 +235,7 @@ export function Backups() {
           status={restorePartialHost.data}
           title="Host restore"
           pathMapping={pluginStatus.data?.pathMapping}
+          mapTargetPath={false}
           onReset={() => void onResetRestorePartialHost()}
         />
       )}
