@@ -1,0 +1,215 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdtemp, mkdir, writeFile, rm, symlink, realpath } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import express from 'express'
+import request from 'supertest'
+import {
+  registerStagingRoutes,
+  resolveStagingFile,
+  StagingPathError,
+  listStagingFiles,
+  type StagingEntry
+} from '../src/database-export/staging-routes.js'
+
+interface ApiSuccess {
+  success: true
+  data: { stagingRoot: string; entries: StagingEntry[] }
+}
+interface ApiFailure {
+  success: false
+  error: { code: string; message: string }
+}
+function asSuccess(body: unknown): ApiSuccess {
+  return body as ApiSuccess
+}
+function asFailure(body: unknown): ApiFailure {
+  return body as ApiFailure
+}
+
+let stagingRoot: string
+let outside: string
+
+beforeEach(async () => {
+  stagingRoot = await mkdtemp(path.join(tmpdir(), 'sk-staging-'))
+  outside = await mkdtemp(path.join(tmpdir(), 'sk-staging-outside-'))
+})
+
+afterEach(async () => {
+  await rm(stagingRoot, { recursive: true, force: true })
+  await rm(outside, { recursive: true, force: true })
+})
+
+function buildApp(): express.Express {
+  const app = express()
+  registerStagingRoutes(app, { getStagingRoot: () => stagingRoot })
+  return app
+}
+
+describe('listStagingFiles', () => {
+  it('returns [] when the root does not exist', async () => {
+    const fakeRoot = path.join(stagingRoot, 'does-not-exist')
+    await expect(listStagingFiles(fakeRoot)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('returns sorted relative paths for every regular file', async () => {
+    await mkdir(path.join(stagingRoot, 'signalk-questdb'), { recursive: true })
+    await writeFile(path.join(stagingRoot, 'signalk-questdb', 'b.parquet'), 'bbb')
+    await writeFile(path.join(stagingRoot, 'signalk-questdb', 'a.parquet'), 'aa')
+    await mkdir(path.join(stagingRoot, 'signalk-database'), { recursive: true })
+    await writeFile(path.join(stagingRoot, 'signalk-database', 'export.sql'), 'sql')
+
+    const entries = await listStagingFiles(stagingRoot)
+    expect(entries.map((e) => e.path)).toEqual([
+      'signalk-database/export.sql',
+      'signalk-questdb/a.parquet',
+      'signalk-questdb/b.parquet'
+    ])
+    expect(entries.find((e) => e.path === 'signalk-questdb/a.parquet')?.size).toBe(2)
+  })
+
+  it('skips symlinks (only reports isFile() entries)', async () => {
+    await writeFile(path.join(stagingRoot, 'real.parquet'), 'real')
+    await symlink(path.join(outside, 'leak.txt'), path.join(stagingRoot, 'evil'))
+    await writeFile(path.join(outside, 'leak.txt'), 'secret')
+
+    const entries = await listStagingFiles(stagingRoot)
+    expect(entries.map((e) => e.path)).toEqual(['real.parquet'])
+  })
+})
+
+describe('resolveStagingFile', () => {
+  it('resolves a simple relative path under the root', async () => {
+    await mkdir(path.join(stagingRoot, 'sub'), { recursive: true })
+    await writeFile(path.join(stagingRoot, 'sub', 'a.txt'), 'x')
+    const resolved = await resolveStagingFile(stagingRoot, 'sub/a.txt')
+    // Realpath the expected root too: macOS resolves /var → /private/var
+    // and Windows resolves short names (RUNNER~1 → runneradmin) inside
+    // mkdtemp output, so a raw path.join comparison fails cross-platform.
+    expect(resolved).toBe(path.join(await realpath(stagingRoot), 'sub', 'a.txt'))
+  })
+
+  it('rejects absolute paths', async () => {
+    await expect(resolveStagingFile(stagingRoot, '/etc/passwd')).rejects.toBeInstanceOf(
+      StagingPathError
+    )
+  })
+
+  it('rejects ".." segments', async () => {
+    await expect(resolveStagingFile(stagingRoot, '../escape.txt')).rejects.toMatchObject({
+      code: 'INVALID_FILE'
+    })
+  })
+
+  it('rejects NUL bytes', async () => {
+    await expect(resolveStagingFile(stagingRoot, 'a\u0000b')).rejects.toMatchObject({
+      code: 'INVALID_FILE'
+    })
+  })
+
+  it('rejects paths that escape via a symlinked parent', async () => {
+    await symlink(outside, path.join(stagingRoot, 'evil-link'))
+    await expect(resolveStagingFile(stagingRoot, 'evil-link/inside.txt')).rejects.toMatchObject({
+      code: 'OUTSIDE_ROOT'
+    })
+  })
+})
+
+describe('GET /api/db-export/staging', () => {
+  it('returns empty entries when staging dir does not exist', async () => {
+    await rm(stagingRoot, { recursive: true, force: true })
+    // Recreate as a non-existent path the route can probe.
+    const fake = stagingRoot
+    const app = express()
+    registerStagingRoutes(app, { getStagingRoot: () => fake })
+    const res = await request(app).get('/api/db-export/staging')
+    expect(res.status).toBe(200)
+    const body = asSuccess(res.body)
+    expect(body.success).toBe(true)
+    expect(body.data.entries).toEqual([])
+    // Recreate so afterEach's rm doesn't error.
+    await mkdir(stagingRoot, { recursive: true })
+  })
+
+  it('lists staged files', async () => {
+    await mkdir(path.join(stagingRoot, 'signalk-questdb'), { recursive: true })
+    await writeFile(path.join(stagingRoot, 'signalk-questdb', 'navigation.parquet'), 'hello')
+
+    const res = await request(buildApp()).get('/api/db-export/staging')
+    expect(res.status).toBe(200)
+    const body = asSuccess(res.body)
+    expect(body.success).toBe(true)
+    expect(body.data.stagingRoot).toBe(stagingRoot)
+    expect(body.data.entries).toHaveLength(1)
+    expect(body.data.entries[0]).toMatchObject({
+      path: 'signalk-questdb/navigation.parquet',
+      size: 5
+    })
+  })
+})
+
+describe('GET /api/db-export/staging/download', () => {
+  it('400s when file query param is missing', async () => {
+    const res = await request(buildApp()).get('/api/db-export/staging/download')
+    expect(res.status).toBe(400)
+    const body = asFailure(res.body)
+    expect(body.success).toBe(false)
+    expect(body.error.code).toBe('INVALID_INPUT')
+  })
+
+  it('400s on ".." traversal', async () => {
+    const res = await request(buildApp()).get(
+      '/api/db-export/staging/download?file=' + encodeURIComponent('../leak.txt')
+    )
+    expect(res.status).toBe(400)
+    expect(asFailure(res.body).error.code).toBe('INVALID_FILE')
+  })
+
+  it('403s on symlink escape', async () => {
+    await symlink(outside, path.join(stagingRoot, 'evil-link'))
+    await writeFile(path.join(outside, 'secret.txt'), 'secret')
+    const res = await request(buildApp()).get(
+      '/api/db-export/staging/download?file=' + encodeURIComponent('evil-link/secret.txt')
+    )
+    expect(res.status).toBe(403)
+    expect(asFailure(res.body).error.code).toBe('OUTSIDE_ROOT')
+  })
+
+  it('404s when the file does not exist', async () => {
+    const res = await request(buildApp()).get(
+      '/api/db-export/staging/download?file=missing.parquet'
+    )
+    expect(res.status).toBe(404)
+    expect(asFailure(res.body).error.code).toBe('FILE_NOT_FOUND')
+  })
+
+  it('400s when target resolves to a directory', async () => {
+    await mkdir(path.join(stagingRoot, 'a-dir'), { recursive: true })
+    const res = await request(buildApp()).get('/api/db-export/staging/download?file=a-dir')
+    expect(res.status).toBe(400)
+    expect(asFailure(res.body).error.code).toBe('NOT_A_FILE')
+  })
+
+  it('streams the file with octet-stream content-type', async () => {
+    await mkdir(path.join(stagingRoot, 'signalk-questdb'), { recursive: true })
+    await writeFile(path.join(stagingRoot, 'signalk-questdb', 'a.parquet'), 'parquet bytes')
+    // supertest doesn't auto-parse octet-stream — use .buffer(true) +
+    // .parse() to collect the body into a Buffer.
+    const res = await request(buildApp())
+      .get(
+        '/api/db-export/staging/download?file=' + encodeURIComponent('signalk-questdb/a.parquet')
+      )
+      .buffer(true)
+      .parse((response, cb) => {
+        const chunks: Buffer[] = []
+        response.on('data', (c: Buffer) => chunks.push(c))
+        response.on('end', () => {
+          cb(null, Buffer.concat(chunks))
+        })
+      })
+    expect(res.status).toBe(200)
+    expect(res.headers['content-type']).toBe('application/octet-stream')
+    expect(res.headers['content-disposition']).toContain('attachment; filename="a.parquet"')
+    expect((res.body as Buffer).toString('utf8')).toBe('parquet bytes')
+  })
+})
