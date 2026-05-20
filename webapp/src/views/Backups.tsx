@@ -18,6 +18,8 @@ import {
 } from 'reactstrap'
 import { api, formatBytes, formatDate, type BackupMetadata, type RestoreState } from '../api'
 import { useApi } from '../useApi'
+import { BackupBrowser } from '../components/BackupBrowser'
+import { ACTIVE_PARTIAL_STATES, PartialRestoreBanner } from '../components/PartialRestoreBanner'
 
 // In-progress restore states (anything other than idle/completed/rolled_back/failed
 // terminal markers we want to keep showing the banner for).
@@ -80,12 +82,14 @@ export function Backups() {
   // Restore status polled at 2s when active, 15s when idle. Two hooks so
   // the polling rate doesn't depend on render-time decisions.
   const restore = useApi(() => api.restoreStatus(), { intervalMs: 2000 })
+  const restorePartial = useApi(() => api.restorePartialStatus(), { intervalMs: 2000 })
 
   const [description, setDescription] = useState('')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [restoringId, setRestoringId] = useState<string | null>(null)
+  const [browseBackup, setBrowseBackup] = useState<BackupMetadata | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [uploadDescription, setUploadDescription] = useState('')
@@ -169,12 +173,25 @@ export function Backups() {
     }
   }
 
+  const onResetRestorePartial = async (): Promise<void> => {
+    try {
+      await api.resetRestorePartialState()
+      restorePartial.refresh()
+    } catch (err) {
+      window.alert(`Reset failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   const allBackups = list.data?.backups ?? []
   const restoreActive = restore.data ? ACTIVE_RESTORE_STATES.has(restore.data.state) : false
+  const restorePartialActive = restorePartial.data
+    ? ACTIVE_PARTIAL_STATES.has(restorePartial.data.state)
+    : false
   // Block ALL row actions while a restore is being kicked off — the polled
   // `restoreActive` flag only flips on the next 2-s tick, so a fast click
-  // could otherwise fire two restores or a delete during a kickoff.
-  const actionsDisabled = restoreActive || restoringId !== null
+  // could otherwise fire two restores or a delete during a kickoff. The
+  // partial-restore branch shares the same global lock on the server.
+  const actionsDisabled = restoreActive || restorePartialActive || restoringId !== null
 
   return (
     <>
@@ -182,6 +199,12 @@ export function Backups() {
 
       {restore.data && (
         <RestoreBanner status={restore.data} onReset={() => void onResetRestore()} />
+      )}
+      {restorePartial.data && (
+        <PartialRestoreBanner
+          status={restorePartial.data}
+          onReset={() => void onResetRestorePartial()}
+        />
       )}
 
       <Row className="mb-3">
@@ -342,6 +365,17 @@ export function Backups() {
                         Download
                       </a>
                       <Button
+                        color="info"
+                        outline
+                        size="sm"
+                        className="me-1"
+                        onClick={() => {
+                          setBrowseBackup(b)
+                        }}
+                      >
+                        Browse…
+                      </Button>
+                      <Button
                         color="warning"
                         outline
                         size="sm"
@@ -368,6 +402,19 @@ export function Backups() {
           )}
         </CardBody>
       </Card>
+
+      {browseBackup && (
+        <BackupBrowser
+          backup={browseBackup}
+          isOpen
+          onClose={() => {
+            setBrowseBackup(null)
+          }}
+          onRestoreStarted={() => {
+            restorePartial.refresh()
+          }}
+        />
+      )}
     </>
   )
 }
