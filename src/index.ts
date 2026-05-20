@@ -15,6 +15,7 @@ import {
 import { ConfigSchema, Config, SCHEMA_DEFAULTS } from './config/schema.js'
 import { resolveImageTag } from './config/image-tag.js'
 import { runAllExports } from './database-export/index.js'
+import { registerStagingRoutes } from './database-export/staging-routes.js'
 
 const BACKUP_IMAGE = 'ghcr.io/dirkwa/signalk-backup-server'
 const CONTAINER_NAME = 'signalk-backup-server'
@@ -450,6 +451,18 @@ export default function (app: BackupServerAPI): Plugin {
         startDbExportTimer()
 
         res.json({ success: true, data: next, timestamp: new Date().toISOString() })
+      })
+
+      // Live staging tree — files the plugin's own db-export tick wrote
+      // to <getDataDirPath()>/database-exports/<sourcePluginId>/. The
+      // root is hard-pinned here; the route handlers refuse anything
+      // that resolves outside it. Snapshotted shards (from older
+      // backups) go through the backup-server's /download-subtree.
+      registerStagingRoutes(router, {
+        getStagingRoot: () => path.join(app.getDataDirPath(), 'database-exports'),
+        log: (msg) => {
+          app.debug(msg)
+        }
       })
 
       // Discovery runs here, not in the container, so multicast doesn't

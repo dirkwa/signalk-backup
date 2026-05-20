@@ -77,6 +77,67 @@ export interface RestoreStatus {
   error?: string
 }
 
+/** One directory entry inside a snapshot, as returned by /backups/:id/tree. */
+export interface BackupTreeEntry {
+  name: string
+  size: number
+  /** ISO-8601 or kopia's locale-formatted timestamp; treat as opaque text. */
+  mtime: string
+  isDir: boolean
+  /** Internal kopia object ID. Forwarded back to the server for downloads. */
+  objectId: string
+}
+
+export type PartialRestoreState =
+  | 'idle'
+  | 'preparing'
+  | 'safety_snapshotting'
+  | 'extracting'
+  | 'verifying'
+  | 'completed'
+  | 'failed'
+  | 'rolling_back'
+  | 'rolled_back'
+
+export interface PartialRestoreStatus {
+  state: PartialRestoreState
+  progress: number
+  statusMessage: string
+  error?: string
+  backupId?: string
+  sourcePath?: string
+  targetPath?: string
+}
+
+export type PartialRestoreTargetMode = 'original' | 'custom'
+
+export interface PartialRestoreInput {
+  sourcePath: string
+  targetMode: PartialRestoreTargetMode
+  /** Required when targetMode is "custom". Must resolve under signalkDataPath. */
+  customPath?: string
+  /** Resubmit with confirmOverwrite=true after a 409 to overwrite an existing entry. */
+  confirmOverwrite?: boolean
+}
+
+/** Body returned with a 409 TARGET_EXISTS so the UI can show the user
+ *  what they'd overwrite before resubmitting with confirmOverwrite. */
+export interface PartialRestoreConflict {
+  targetPath: string
+  mtime: string | null
+  size: number | null
+}
+
+/** One file in the live staging tree (the plugin's own
+ *  database-exports/<sourcePluginId>/...). */
+export interface StagingFileEntry {
+  /** Path relative to the staging root, forward-slash separated. */
+  path: string
+  size: number
+  /** ISO-8601 mtime. */
+  mtime: string
+}
+
 export type CloudSyncMode = 'manual' | 'after_backup' | 'scheduled'
 export type CloudSyncFrequency = 'daily' | 'weekly'
 
@@ -243,6 +304,19 @@ interface ApiEnvelope<T> {
   error?: { code?: string; message?: string }
 }
 
+/** Thrown by api.restorePartial when the target already exists and the
+ *  caller didn't pass confirmOverwrite. Carries the existing entry's
+ *  mtime+size so the UI can show a confirmation diff and resubmit. */
+export class PartialRestoreConflictError extends Error {
+  constructor(
+    message: string,
+    public readonly conflict: PartialRestoreConflict
+  ) {
+    super(message)
+    this.name = 'PartialRestoreConflictError'
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(API_BASE + path, init)
   if (!res.ok) {
@@ -313,6 +387,77 @@ export const api = {
   // Direct download URL — caller uses as <a href> or window.open(). No
   // unwrap because it's a binary stream, not JSON.
   downloadUrl: (id: string): string => `${API_BASE}/backups/${encodeURIComponent(id)}/download`,
+
+  // Partial restore / tree-browser passthrough (signalk-backup#30).
+  // Proxied through the plugin to the backup-server's identical endpoints.
+
+  listBackupTree: (id: string, path: string) =>
+    request<{ path: string; entries: BackupTreeEntry[] }>(
+      `/backups/${encodeURIComponent(id)}/tree?path=${encodeURIComponent(path)}`
+    ),
+
+  /** URL the browser can open / fetch to download one sub-path (raw bytes
+   *  for files, ZIP for directories). Returned as a URL because it's a
+   *  binary stream; pass via window.open() or an <a href>. */
+  downloadSubtreeUrl: (id: string, path: string): string =>
+    `${API_BASE}/backups/${encodeURIComponent(id)}/download-subtree?path=${encodeURIComponent(path)}`,
+
+  /** Start a partial restore. Throws PartialRestoreConflictError when
+   *  the target already exists and confirmOverwrite wasn't set — the
+   *  UI should surface the conflict and resubmit with confirmOverwrite. */
+  restorePartial: async (id: string, input: PartialRestoreInput): Promise<{ started: boolean }> => {
+    const url = `${API_BASE}/backups/${encodeURIComponent(id)}/restore-partial`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input)
+    })
+    if (res.status === 409) {
+      const body = (await res.json().catch(() => null)) as
+        | (ApiEnvelope<{ conflict?: PartialRestoreConflict }> & {
+            data?: { conflict?: PartialRestoreConflict }
+          })
+        | null
+      const conflict = body?.data?.conflict
+      const code = body?.error?.code
+      if (code === 'TARGET_EXISTS' && conflict) {
+        throw new PartialRestoreConflictError(
+          body.error?.message ?? 'Target already exists',
+          conflict
+        )
+      }
+      // Other 409s (BUSY, RESTORE_NEEDS_FULL, CONFLICT from path-safety) —
+      // surface as a plain Error so the existing handler shows the message.
+      throw new Error(
+        `restore-partial → 409${code ? ` [${code}]` : ''}: ${body?.error?.message ?? 'conflict'}`
+      )
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`restore-partial → ${res.status}: ${text.slice(0, 200)}`)
+    }
+    const body = (await res.json()) as ApiEnvelope<{ started: boolean }>
+    if (body.success === false) {
+      throw new Error(`restore-partial: ${body.error?.message ?? 'unknown error'}`)
+    }
+    return body.data ?? { started: true }
+  },
+
+  restorePartialStatus: () => request<PartialRestoreStatus>('/backups/restore-partial/status'),
+
+  resetRestorePartialState: () =>
+    request<{ message: string }>('/backups/restore-partial/reset', { method: 'POST' }),
+
+  // Live DB-export staging (plugin-side, not proxied). Lists files the
+  // plugin wrote during its scheduled tick to
+  // <getDataDirPath()>/database-exports/<sourcePluginId>/...
+  listStaging: () =>
+    request<{ stagingRoot: string; entries: StagingFileEntry[] }>('/db-export/staging'),
+
+  /** Direct download URL for one live-staging file (URL-encoded relative
+   *  path). Returned as a URL because it's a binary stream. */
+  stagingDownloadUrl: (file: string): string =>
+    `${API_BASE}/db-export/staging/download?file=${encodeURIComponent(file)}`,
 
   // Cloud sync — Google Drive auth + sync. Auth flow: connectGDrive
   // returns a Google OAuth URL the user opens; the browser is redirected
