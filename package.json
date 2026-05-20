@@ -33,6 +33,14 @@
       "name": "Backup",
       "description": "Scheduled deduplicated backups to local storage and Google Drive"
     },
+    "screenshots": [
+      "./docs/screenshots/1_signalk-backup_dashboard.png",
+      "./docs/screenshots/2_signalk-backup_backups.png",
+      "./docs/screenshots/3_signalk-backup_browse.png",
+      "./docs/screenshots/4_signalk-backup_database-exports.png",
+      "./docs/screenshots/5_signalk-backup_cloud-sync.png",
+      "./docs/screenshots/6_signalk-backup_settings.png"
+    ],
     "requires": [
       "signalk-container"
     ]
