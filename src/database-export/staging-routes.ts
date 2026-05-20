@@ -1,47 +1,23 @@
-// Plugin-side routes for the database-export staging tree. The
-// orchestrator at runAllExports() writes Parquet shards + per-source
-// MANIFEST.json files to <stagingRoot>/<sourcePluginId>/...; these
-// routes let the webapp list and download those files without pulling
-// the whole snapshot from the backup-server. For "download from a
-// historical backup" the webapp uses the server's /download-subtree
-// endpoint instead — both pipes feed the same UI tab.
-//
-// stagingRoot is hard-pinned by the caller (typically
-// `<getDataDirPath()>/database-exports`) and is the only directory
-// these handlers will read. A `file` query param is path-resolved and
-// rejected if it escapes that root, so a manipulated request can't
-// turn this into an arbitrary file lister.
+// stagingRoot is hard-pinned by the caller; the file query param is
+// realpath-resolved against it so a manipulated request can't escape.
 
 import { createReadStream } from 'node:fs'
-import { readdir, realpath, stat } from 'node:fs/promises'
+import { lstat, readdir, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { IRouter, Request, Response } from 'express'
 
 export interface StagingEntry {
-  /** Path relative to stagingRoot, using forward slashes. */
   path: string
-  /** File size in bytes. */
   size: number
-  /** Last-modified time, ISO-8601. */
   mtime: string
 }
 
 export interface StagingRoutesOptions {
-  /**
-   * Absolute path to the database-exports root. Files outside this
-   * directory are never served.
-   */
   getStagingRoot: () => string
-  /** Optional debug logger. */
   log?: (msg: string) => void
 }
 
-/**
- * Register `GET /api/db-export/staging` (list) and
- * `GET /api/db-export/staging/download` (stream one file) on `router`.
- * Must be registered before the `/api/*` proxy catch-all so it isn't
- * forwarded to the backup-server.
- */
+// Must register before /api/* proxy catch-all to avoid forwarding to backup-server.
 export function registerStagingRoutes(router: IRouter, opts: StagingRoutesOptions): void {
   router.get('/api/db-export/staging', async (_req: Request, res: Response) => {
     const root = opts.getStagingRoot()
@@ -149,12 +125,8 @@ export function registerStagingRoutes(router: IRouter, opts: StagingRoutesOption
   })
 }
 
-/**
- * List every regular file under `stagingRoot`, recursively. Returns an
- * empty list when the root doesn't exist (DB exports never ran).
- * Symlinks and special files are skipped — only `isFile()` entries
- * land in the result so a malicious symlink can't leak file contents.
- */
+// Recursively lists regular files under stagingRoot; throws ENOENT if
+// root is missing (route handler maps that to an empty response).
 export async function listStagingFiles(stagingRoot: string): Promise<StagingEntry[]> {
   const root = await realpath(stagingRoot)
   const out: StagingEntry[] = []
@@ -178,7 +150,11 @@ async function walk(root: string, current: string, out: StagingEntry[]): Promise
       continue
     }
     if (!entry.isFile()) continue
-    const s = await stat(child)
+    // lstat (not stat) so a symlink swapped in between readdir and here
+    // doesn't get followed; re-verify isFile after the lstat in case the
+    // entry was replaced.
+    const s = await lstat(child)
+    if (!s.isFile()) continue
     out.push({
       path: path.relative(root, child).split(path.sep).join('/'),
       size: s.size,
@@ -198,13 +174,8 @@ export class StagingPathError extends Error {
   }
 }
 
-/**
- * Resolve `file` (which arrives as a forward-slash relative path) to an
- * absolute path under stagingRoot. Throws StagingPathError when the
- * resolved path escapes the root via `..`, a symlink, or an absolute
- * input. Symlinks are detected because we realpath both the root and
- * the deepest existing ancestor of the target.
- */
+// Realpath both ends so a symlink-hop in the middle is resolved before
+// we compare paths — otherwise a symlink could escape stagingRoot.
 export async function resolveStagingFile(stagingRoot: string, file: string): Promise<string> {
   if (file.includes('\0')) {
     throw new StagingPathError('file must not contain NUL bytes', 'INVALID_FILE', 400)

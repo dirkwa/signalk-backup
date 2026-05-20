@@ -413,11 +413,9 @@ export const api = {
       body: JSON.stringify(input)
     })
     if (res.status === 409) {
-      const body = (await res.json().catch(() => null)) as
-        | (ApiEnvelope<{ conflict?: PartialRestoreConflict }> & {
-            data?: { conflict?: PartialRestoreConflict }
-          })
-        | null
+      const body = (await res.json().catch(() => null)) as ApiEnvelope<{
+        conflict?: PartialRestoreConflict
+      }> | null
       const conflict = body?.data?.conflict
       const code = body?.error?.code
       if (code === 'TARGET_EXISTS' && conflict) {
