@@ -407,6 +407,7 @@ export function Backups() {
         <BackupBrowser
           backup={browseBackup}
           isOpen
+          restoreLocked={actionsDisabled}
           onClose={() => {
             setBrowseBackup(null)
           }}

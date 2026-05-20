@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert,
   Badge,
@@ -26,6 +26,11 @@ interface Props {
    *  Used by the Database Exports view to root the picker on the
    *  database-exports subtree. */
   initialPath?: string
+  /** When true, disable the per-entry Restore action so the user can't
+   *  initiate a partial restore while a full or partial restore is
+   *  already in flight. Browse/Download stay enabled — those are
+   *  read-only and the server-side global lock would 409 us anyway. */
+  restoreLocked?: boolean
   /** Called when a partial restore is kicked off; the parent should
    *  refresh its restore-status poller so the banner appears quickly. */
   onRestoreStarted?: () => void
@@ -46,19 +51,31 @@ function joinPath(prefix: string, name: string): string {
   return `${prefix}/${name}`
 }
 
-export function BackupBrowser({ backup, isOpen, onClose, initialPath, onRestoreStarted }: Props) {
+export function BackupBrowser({
+  backup,
+  isOpen,
+  onClose,
+  initialPath,
+  restoreLocked,
+  onRestoreStarted
+}: Props) {
   const rootPath = (initialPath ?? '').replace(/^\/+|\/+$/g, '')
   const [cache, setCache] = useState<Cache>({})
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([rootPath]))
   const [restoreTarget, setRestoreTarget] = useState<
     (BackupTreeEntry & { fullPath: string }) | null
   >(null)
+  // Bumped whenever the browser is re-opened against a different backup
+  // or root. In-flight listBackupTree calls captured the previous gen;
+  // when their response lands we drop it so the cache stays consistent.
+  const requestGenRef = useRef(0)
 
   // Reset when the user opens the browser against a different backup or
   // root — without this, switching backups would show stale entries from
   // the previous one until each folder was re-fetched.
   useEffect(() => {
     if (!isOpen) return
+    requestGenRef.current += 1
     setCache({})
     setExpanded(new Set([rootPath]))
     setRestoreTarget(null)
@@ -66,11 +83,14 @@ export function BackupBrowser({ backup, isOpen, onClose, initialPath, onRestoreS
 
   const loadFolder = useCallback(
     async (folderPath: string): Promise<void> => {
+      const gen = requestGenRef.current
       setCache((c) => ({ ...c, [folderPath]: { entries: null, error: null } }))
       try {
         const res = await api.listBackupTree(backup.id, folderPath)
+        if (gen !== requestGenRef.current) return
         setCache((c) => ({ ...c, [folderPath]: { entries: res.entries, error: null } }))
       } catch (err) {
+        if (gen !== requestGenRef.current) return
         setCache((c) => ({
           ...c,
           [folderPath]: {
@@ -135,6 +155,7 @@ export function BackupBrowser({ backup, isOpen, onClose, initialPath, onRestoreS
           depth={0}
           cache={cache}
           expanded={expanded}
+          restoreLocked={restoreLocked === true}
           onToggle={toggleFolder}
           onRetry={loadFolder}
           onStartRestore={startRestore}
@@ -167,6 +188,7 @@ interface NodeProps {
   depth: number
   cache: Cache
   expanded: Set<string>
+  restoreLocked: boolean
   onToggle: (path: string) => void
   onRetry: (path: string) => Promise<void>
   onStartRestore: (entry: BackupTreeEntry, fullPath: string) => void
@@ -178,6 +200,7 @@ function FolderNode({
   depth,
   cache,
   expanded,
+  restoreLocked,
   onToggle,
   onRetry,
   onStartRestore
@@ -224,18 +247,26 @@ function FolderNode({
         return (
           <li key={entry.name} className="py-1">
             <div className="d-flex align-items-center gap-2 flex-wrap">
-              <Button
-                color="link"
-                size="sm"
-                className="p-0 text-decoration-none"
-                onClick={() => {
-                  if (entry.isDir) onToggle(fullPath)
-                }}
-                style={{ minWidth: '1.2em' }}
-                aria-expanded={entry.isDir ? isExpanded : undefined}
-              >
-                {entry.isDir ? (isExpanded ? '▾' : '▸') : ''}
-              </Button>
+              {entry.isDir ? (
+                <Button
+                  color="link"
+                  size="sm"
+                  className="p-0 text-decoration-none"
+                  onClick={() => {
+                    onToggle(fullPath)
+                  }}
+                  style={{ minWidth: '1.2em' }}
+                  aria-expanded={isExpanded}
+                  aria-label={isExpanded ? 'Collapse folder' : 'Expand folder'}
+                >
+                  {isExpanded ? '▾' : '▸'}
+                </Button>
+              ) : (
+                // Non-interactive placeholder for files: keeps the
+                // column aligned without putting an empty button in
+                // the tab order (one extra tab stop per file row).
+                <span aria-hidden="true" style={{ minWidth: '1.2em', display: 'inline-block' }} />
+              )}
               <span
                 className={entry.isDir ? 'fw-semibold' : ''}
                 onClick={() => {
@@ -264,6 +295,8 @@ function FolderNode({
                   color="warning"
                   outline
                   size="sm"
+                  disabled={restoreLocked}
+                  title={restoreLocked ? 'A restore is already in progress' : undefined}
                   onClick={() => {
                     onStartRestore(entry, fullPath)
                   }}
@@ -279,6 +312,7 @@ function FolderNode({
                 depth={depth + 1}
                 cache={cache}
                 expanded={expanded}
+                restoreLocked={restoreLocked}
                 onToggle={onToggle}
                 onRetry={onRetry}
                 onStartRestore={onStartRestore}
