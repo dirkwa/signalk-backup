@@ -16,6 +16,13 @@ export interface PluginStatus {
     managed: boolean
   }
   ready: boolean
+  /** Container→host path translation. Present only in managed-container
+   *  mode. Used by the UI to rewrite server-reported paths under
+   *  containerPath/... into the host equivalent for display. */
+  pathMapping?: {
+    containerPath: string
+    hostPath: string
+  }
 }
 
 /** Backup categorisation; common values are manual/hourly/daily/weekly/startup
@@ -602,6 +609,27 @@ export function formatBytes(bytes: number): string {
     i++
   }
   return `${size.toFixed(1)} ${units[i]}`
+}
+
+/** Rewrite a server-reported absolute path so it's recognisable on the
+ *  host. In managed-container mode the backup-server sees the host's
+ *  SignalK config root mounted at containerPath; any path it reports
+ *  starting with that prefix actually lives at hostPath/... on the
+ *  host. Returns the path unchanged when no mapping is provided or
+ *  when the path is outside the mapped prefix. */
+export function toHostPath(
+  serverPath: string | undefined,
+  mapping: PluginStatus['pathMapping'] | undefined
+): string | undefined {
+  if (!serverPath || !mapping) return serverPath
+  const { containerPath, hostPath } = mapping
+  if (serverPath === containerPath) return hostPath
+  const prefix = containerPath.endsWith('/') ? containerPath : containerPath + '/'
+  if (serverPath.startsWith(prefix)) {
+    const hostBase = hostPath.endsWith('/') ? hostPath.slice(0, -1) : hostPath
+    return hostBase + '/' + serverPath.slice(prefix.length)
+  }
+  return serverPath
 }
 
 export function formatDate(dateStr: string | null | undefined): string {

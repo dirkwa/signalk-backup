@@ -16,11 +16,13 @@ import {
   formatBytes,
   formatDate,
   PartialRestoreConflictError,
+  toHostPath,
   type BackupMetadata,
   type BackupTreeEntry,
   type PartialRestoreConflict,
   type PartialRestoreInput,
-  type PartialRestoreTargetMode
+  type PartialRestoreTargetMode,
+  type PluginStatus
 } from '../api'
 
 interface Props {
@@ -28,6 +30,9 @@ interface Props {
   sourceEntry: BackupTreeEntry
   /** Path inside the snapshot, relative to root. */
   sourcePath: string
+  /** Container→host path mapping; passed through from the parent so
+   *  conflict-diff targets display as user-meaningful host paths. */
+  pathMapping?: PluginStatus['pathMapping']
   onClose: () => void
   /** Called after the server accepts the request (HTTP 202). */
   onSubmitted: () => void
@@ -37,6 +42,7 @@ export function PartialRestoreModal({
   backup,
   sourceEntry,
   sourcePath,
+  pathMapping,
   onClose,
   onSubmitted
 }: Props) {
@@ -141,7 +147,7 @@ export function PartialRestoreModal({
           <Alert color="warning" className="mt-3 mb-0">
             <div className="fw-semibold">Target already exists</div>
             <div className="small mb-2">
-              <code>{conflict.targetPath}</code>
+              <code>{toHostPath(conflict.targetPath, pathMapping)}</code>
             </div>
             <div className="small">
               <div>

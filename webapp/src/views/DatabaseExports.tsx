@@ -23,6 +23,7 @@ const STAGING_SUBPATH = 'plugin-config-data/signalk-backup/database-exports'
 export function DatabaseExports() {
   const staging = useApi(() => api.listStaging(), { intervalMs: 30000 })
   const backups = useApi(() => api.listBackups(), { intervalMs: 60000 })
+  const pluginStatus = useApi(() => api.pluginStatus(), { intervalMs: 60000 })
   const [browseBackup, setBrowseBackup] = useState<BackupMetadata | null>(null)
   const [selectedBackupId, setSelectedBackupId] = useState<string>('')
 
@@ -168,6 +169,7 @@ export function DatabaseExports() {
           backup={browseBackup}
           isOpen
           initialPath={STAGING_SUBPATH}
+          pathMapping={pluginStatus.data?.pathMapping}
           onClose={() => {
             setBrowseBackup(null)
           }}

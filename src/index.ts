@@ -267,13 +267,26 @@ export default function (app: BackupServerAPI): Plugin {
           containerImage = `${BACKUP_IMAGE}:${resolveImageTag(currentSettings?.imageTag ?? 'auto')}`
         }
 
+        // In managed-container mode the plugin bind-mounts the SignalK
+        // config root at SK_MOUNT inside the container, so every
+        // server-reported path under SK_MOUNT/... actually lives at
+        // <signalkConfigRoot>/... on the host. The UI uses this to
+        // translate restore target paths in status banners. External
+        // mode (no managed container) → field is omitted; the UI
+        // shows the server's raw path because no mapping is known.
+        const managed = currentSettings?.managedContainer !== false
+        const pathMapping = managed
+          ? { containerPath: SK_MOUNT, hostPath: resolveSignalkConfigRoot() }
+          : undefined
+
         res.json({
           container: {
             state: containerState,
             image: containerImage,
-            managed: currentSettings?.managedContainer !== false
+            managed
           },
-          ready: client !== null
+          ready: client !== null,
+          ...(pathMapping ? { pathMapping } : {})
         })
       })
 

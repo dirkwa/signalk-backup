@@ -1,5 +1,10 @@
 import { Alert, Button, Progress } from 'reactstrap'
-import type { PartialRestoreState, PartialRestoreStatus } from '../api'
+import {
+  toHostPath,
+  type PartialRestoreState,
+  type PartialRestoreStatus,
+  type PluginStatus
+} from '../api'
 
 const ACTIVE_PARTIAL_STATES: ReadonlySet<PartialRestoreState> = new Set<PartialRestoreState>([
   'preparing',
@@ -11,15 +16,20 @@ const ACTIVE_PARTIAL_STATES: ReadonlySet<PartialRestoreState> = new Set<PartialR
 
 interface Props {
   status: PartialRestoreStatus
+  /** Container→host path mapping from /status; undefined in external
+   *  mode. When supplied, targetPath under the mapped prefix is shown
+   *  as its host equivalent instead of the container path. */
+  pathMapping?: PluginStatus['pathMapping']
   onReset: () => void
 }
 
-export function PartialRestoreBanner({ status, onReset }: Props) {
+export function PartialRestoreBanner({ status, pathMapping, onReset }: Props) {
   if (status.state === 'idle') return null
 
   const active = ACTIVE_PARTIAL_STATES.has(status.state)
   const failed = status.state === 'failed' || status.state === 'rolled_back'
   const completed = status.state === 'completed'
+  const hostTargetPath = toHostPath(status.targetPath, pathMapping)
 
   return (
     <Alert
@@ -33,10 +43,10 @@ export function PartialRestoreBanner({ status, onReset }: Props) {
           {status.sourcePath && (
             <div className="small text-muted">
               source <code>{status.sourcePath}</code>
-              {status.targetPath && (
+              {hostTargetPath && (
                 <>
                   {' '}
-                  → target <code>{status.targetPath}</code>
+                  → target <code>{hostTargetPath}</code>
                 </>
               )}
             </div>

@@ -13,3 +13,6 @@ plugin/**/*.js
 plugin/**/*.js.map
 plugin/**/*.d.ts
 plugin/**/*.d.ts.map
+
+# Local CodeRabbit review artifacts (saved per workflow rule).
+cr-review*.txt
