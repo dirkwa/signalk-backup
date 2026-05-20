@@ -13,6 +13,7 @@ import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { GrafanaExporter } from './grafana.js'
 import { QuestDBExporter } from './questdb.js'
+import { SignalKDatabaseExporter } from './signalk-database.js'
 import type { DatabaseExporter, ExportResult } from './types.js'
 
 const PLUGIN_ID = 'signalk-backup'
@@ -26,7 +27,7 @@ export interface ExportOrchestratorOptions {
   /** Optional debug logger. */
   log?: (msg: string) => void
   // Missing key = disabled, matching SCHEMA_DEFAULTS.databaseExport.
-  enabled?: { questdb?: boolean; grafana?: boolean }
+  enabled?: { questdb?: boolean; grafana?: boolean; signalkDatabase?: boolean }
 }
 
 /**
@@ -61,6 +62,14 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
       })
     )
   }
+  if (enabled.signalkDatabase === true) {
+    exporters.push(
+      new SignalKDatabaseExporter({
+        signalkBaseUrl: opts.signalkBaseUrl,
+        log: opts.log
+      })
+    )
+  }
 
   const results: ExportResult[] = []
   for (const exporter of exporters) {
@@ -88,3 +97,4 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
 export type { DatabaseExporter, ExportResult, TableExport } from './types.js'
 export { GrafanaExporter } from './grafana.js'
 export { QuestDBExporter } from './questdb.js'
+export { SignalKDatabaseExporter } from './signalk-database.js'

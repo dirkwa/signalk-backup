@@ -38,9 +38,17 @@ export const ConfigSchema = Type.Object({
     {
       questdb: Type.Boolean({ default: false }),
       grafana: Type.Boolean({ default: false }),
+      signalkDatabase: Type.Boolean({ default: false }),
       intervalMinutes: Type.Number({ default: 60, minimum: 5, maximum: 1440 })
     },
-    { default: { questdb: false, grafana: false, intervalMinutes: 60 } }
+    {
+      default: {
+        questdb: false,
+        grafana: false,
+        signalkDatabase: false,
+        intervalMinutes: 60
+      }
+    }
   )
 })
 
@@ -63,6 +71,7 @@ export const SCHEMA_DEFAULTS: Config = {
   databaseExport: {
     questdb: false,
     grafana: false,
+    signalkDatabase: false,
     intervalMinutes: 60
   }
 }
