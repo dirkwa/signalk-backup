@@ -34,7 +34,7 @@ The plugin pulls `ghcr.io/dirkwa/signalk-backup-server` at a server version it p
 
 ## How it works
 
-```
+```text
 Browser
   └── /signalk-backup/                                  ← plugin webapp (React)
        └── /plugins/signalk-backup/api/*                ← plugin's reverse proxy
@@ -61,7 +61,7 @@ The webapp has four tabs:
 
 ## Configuration
 
-Most settings live in the **webapp** under Settings. The plugin's SignalK Admin UI config panel is intentionally small and handles only deployment-level options:
+Most settings live in the **webapp** under Settings. The plugin's SignalK Admin UI config panel is intentionally small and handles only deployment-level options (the schema in [src/config/schema.ts](src/config/schema.ts) is the source of truth — update this list if you bump it):
 
 - `managedContainer` — let the plugin manage the backup-server container (default), or point at an external instance
 - `imageTag` — pin a specific version or use `auto` (default — resolves to the BACKUP_SERVER_VERSION constant)

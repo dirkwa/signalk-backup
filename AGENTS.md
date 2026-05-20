@@ -23,7 +23,7 @@ Listed in `package.json` under `signalk.requires`:
 - [src/index.ts](src/index.ts) — plugin entrypoint. Six responsibilities:
   1. `start(config)` — spread `SCHEMA_DEFAULTS` over the incoming `config`, kick off `asyncStart`. **Do not skip the spread**; Signal K does not seed schema defaults at runtime (see Gotchas).
   2. `asyncStart(config)` — branch on `managedContainer`. Container mode: poll `globalThis.__signalk_containerManager` (signalk-container loads after us alphabetically), `ensureRunning` the backup-server image, resolve its actual host:port via `resolveActualAddress`, construct a `BackupClient`, wait for `/api/health`, seed the first-run schedule. External mode: skip the container, build the `BackupClient` against `externalUrl`.
-  3. `registerWithRouter(router)` — registers in this order, then a catch-all `/api/*` proxy LAST:
+  3. `registerWithRouter(router)` — registers in this order, then a catch-all `/api/*` proxy LAST. **Keep this list in sync with the code** when adding or removing routes; the canonical source is `registerWithRouter` in [src/index.ts](src/index.ts):
      - `/status` — container state + `pathMapping` for the UI's container→host path translation
      - `/api/update/check`, `/api/update/apply` — image-update flow
      - `/api/db-export/config` (GET/POST) — plugin owns the export timer
