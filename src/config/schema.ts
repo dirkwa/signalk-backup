@@ -22,7 +22,7 @@ export const ConfigSchema = Type.Object({
     default: 'auto',
     title: 'Container image tag',
     description:
-      '"auto" (default) tracks the plugin version, so upgrading the plugin upgrades the container. ' +
+      '"auto" (default) tracks the signalk-backup-server version this plugin release was tested against. ' +
       'Pin to a specific version (e.g. "0.4.0") or use a floating tag (e.g. "latest") to override.'
   }),
   externalUrl: Type.String({

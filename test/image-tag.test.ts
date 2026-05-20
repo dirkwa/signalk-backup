@@ -1,17 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { PLUGIN_VERSION, resolveImageTag } from '../src/config/image-tag.js'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { BACKUP_SERVER_VERSION, resolveImageTag } from '../src/config/image-tag.js'
 
 describe('resolveImageTag', () => {
-  it('PLUGIN_VERSION matches package.json version', () => {
-    const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url))
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version: string }
-    expect(PLUGIN_VERSION).toBe(pkg.version)
+  it('"auto" resolves to BACKUP_SERVER_VERSION', () => {
+    expect(resolveImageTag('auto')).toBe(BACKUP_SERVER_VERSION)
   })
 
-  it('"auto" resolves to the plugin version', () => {
-    expect(resolveImageTag('auto')).toBe(PLUGIN_VERSION)
+  it('BACKUP_SERVER_VERSION is a semver string', () => {
+    expect(BACKUP_SERVER_VERSION).toMatch(/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/)
   })
 
   it('legacy "latest" is passed through verbatim', () => {
