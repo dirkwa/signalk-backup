@@ -1,15 +1,12 @@
 import { Type, Static } from '@sinclair/typebox'
 
-/**
- * Schema for the SignalK Admin UI plugin config form. Only the
- * per-deployment knobs the SignalK admin needs to set up — backup
- * schedule, retention, cloud sync, exclusions, password, database
- * export are all in the webapp's Settings view at /signalk-backup/.
- *
- * For LOG_LEVEL: defaults to "info"; power users can override via
- * signalk-container's per-container env override
- * (containerOverrides.signalk-backup-server.env.LOG_LEVEL).
- */
+// Schema for the SignalK Admin UI plugin config form — deployment
+// knobs only. databaseExport.* is intentionally NOT in here: the
+// webapp's Settings tab owns that UI, and RJSF can't reliably hide a
+// required-int field even with ui:widget='hidden' (validation chrome
+// leaks). savePluginOptions still round-trips the persisted value
+// because SignalK's options store accepts any JSON, not just
+// schema-described keys.
 export const ConfigSchema = Type.Object({
   managedContainer: Type.Boolean({
     default: true,
@@ -31,39 +28,28 @@ export const ConfigSchema = Type.Object({
     description:
       'Used only when managedContainer is disabled. e.g. http://192.168.1.50:3010. ' +
       'Leave blank when managing the container.'
-  }),
-  // Must exist in the schema so savePluginOptions round-trips it; the
-  // form hides it via uiSchema in src/index.ts (webapp owns the UI).
-  databaseExport: Type.Object(
-    {
-      questdb: Type.Boolean({ default: false }),
-      grafana: Type.Boolean({ default: false }),
-      signalkDatabase: Type.Boolean({ default: false }),
-      intervalMinutes: Type.Number({ default: 60, minimum: 5, maximum: 1440 })
-    },
-    {
-      default: {
-        questdb: false,
-        grafana: false,
-        signalkDatabase: false,
-        intervalMinutes: 60
-      }
-    }
-  )
+  })
 })
 
-export type Config = Static<typeof ConfigSchema>
+// databaseExport lives off-schema (see ConfigSchema comment). Still
+// part of the persisted Config at runtime — Signal K's options store
+// round-trips arbitrary keys, the schema just drives the form.
+export interface DatabaseExportConfig {
+  questdb: boolean
+  grafana: boolean
+  signalkDatabase: boolean
+  intervalMinutes: number
+}
 
-/**
- * Materialised defaults — Signal K only uses the schema's `default` fields
- * to seed the Admin UI form, NOT to inject defaults into the runtime config
- * object passed to `plugin.start()`. When the plugin is auto-enabled
- * (signalk-plugin-enabled-by-default) or enabled without saving the form,
- * start() receives `{}`. Spread SCHEMA_DEFAULTS in start() so every field
- * is present at runtime.
- *
- * See AGENTS.md §"Plugin-specific gotchas".
- */
+export type Config = Static<typeof ConfigSchema> & {
+  databaseExport: DatabaseExportConfig
+}
+
+// Materialised defaults — Signal K only uses the schema's `default` fields
+// to seed the Admin UI form, NOT to inject defaults into the runtime config
+// object passed to plugin.start(). Spread SCHEMA_DEFAULTS in start() so
+// every field is present even when start() is called with `{}`.
+// See AGENTS.md §"Plugin-specific gotchas".
 export const SCHEMA_DEFAULTS: Config = {
   managedContainer: true,
   imageTag: 'auto',
