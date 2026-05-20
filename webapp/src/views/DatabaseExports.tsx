@@ -38,12 +38,65 @@ export function DatabaseExports() {
     <>
       <h2 className="mb-3">Database exports</h2>
       <p className="text-muted">
-        QuestDB, Grafana and signalk-database exports staged by the plugin. The live list shows
-        what's on disk right now (the next backup will include these). The picker below extracts the
-        database-exports subtree from any historical backup without pulling the whole snapshot.
+        QuestDB, Grafana and signalk-database exports staged by the plugin. The top card extracts
+        the database-exports subtree from any historical backup without pulling the whole snapshot;
+        the live list below shows what's on disk right now (the next backup will include these).
       </p>
 
       <Card className="mb-3">
+        <CardHeader>
+          <strong>Extract from a historical backup</strong>{' '}
+          <Badge color="light" className="text-dark ms-1">
+            Browser scoped to {STAGING_SUBPATH}
+          </Badge>
+        </CardHeader>
+        <CardBody>
+          <p className="small text-muted mb-3">
+            Pick a backup and open the database-exports subtree. From there you can download
+            individual files (octet-stream) or whole subdirectories (ZIP) without pulling the full
+            snapshot.
+          </p>
+
+          {backups.loading && !backups.data ? (
+            <Spinner size="sm" />
+          ) : backups.error ? (
+            <Alert color="danger" className="mb-0">
+              {backups.error}
+            </Alert>
+          ) : allBackups.length === 0 ? (
+            <p className="text-muted mb-0">
+              No backups yet. Once the scheduler runs (or you create a manual one), it will appear
+              here.
+            </p>
+          ) : (
+            <div className="d-flex gap-2 align-items-end flex-wrap">
+              <div style={{ minWidth: '20rem', flex: '1 1 20rem' }}>
+                <Label for="db-export-backup-picker">Backup</Label>
+                <Input
+                  id="db-export-backup-picker"
+                  type="select"
+                  value={selectedBackupId}
+                  onChange={(e) => {
+                    setSelectedBackupId(e.target.value)
+                  }}
+                >
+                  <option value="">— select a backup —</option>
+                  {allBackups.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {formatDate(b.createdAt)} · {b.type} · {b.id.slice(0, 12)}
+                    </option>
+                  ))}
+                </Input>
+              </div>
+              <Button color="primary" disabled={!selectedBackupId} onClick={onOpenBackup}>
+                Open browser
+              </Button>
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      <Card>
         <CardHeader className="d-flex justify-content-between align-items-center">
           <strong>Live staging ({stagingEntries.length})</strong>
           <Button
@@ -105,59 +158,6 @@ export function DatabaseExports() {
           {staging.data?.stagingRoot && (
             <div className="px-3 py-2 small text-muted border-top">
               Staging root: <code>{staging.data.stagingRoot}</code>
-            </div>
-          )}
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <strong>Extract from a historical backup</strong>{' '}
-          <Badge color="light" className="text-dark ms-1">
-            Browser scoped to {STAGING_SUBPATH}
-          </Badge>
-        </CardHeader>
-        <CardBody>
-          <p className="small text-muted mb-3">
-            Pick a backup and open the database-exports subtree. From there you can download
-            individual files (octet-stream) or whole subdirectories (ZIP) without pulling the full
-            snapshot.
-          </p>
-
-          {backups.loading && !backups.data ? (
-            <Spinner size="sm" />
-          ) : backups.error ? (
-            <Alert color="danger" className="mb-0">
-              {backups.error}
-            </Alert>
-          ) : allBackups.length === 0 ? (
-            <p className="text-muted mb-0">
-              No backups yet. Once the scheduler runs (or you create a manual one), it will appear
-              here.
-            </p>
-          ) : (
-            <div className="d-flex gap-2 align-items-end flex-wrap">
-              <div style={{ minWidth: '20rem', flex: '1 1 20rem' }}>
-                <Label for="db-export-backup-picker">Backup</Label>
-                <Input
-                  id="db-export-backup-picker"
-                  type="select"
-                  value={selectedBackupId}
-                  onChange={(e) => {
-                    setSelectedBackupId(e.target.value)
-                  }}
-                >
-                  <option value="">— select a backup —</option>
-                  {allBackups.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {formatDate(b.createdAt)} · {b.type} · {b.id.slice(0, 12)}
-                    </option>
-                  ))}
-                </Input>
-              </div>
-              <Button color="primary" disabled={!selectedBackupId} onClick={onOpenBackup}>
-                Open browser
-              </Button>
             </div>
           )}
         </CardBody>
