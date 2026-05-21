@@ -1,12 +1,4 @@
-// WHY this file exists: GH issue #33 — publish backup health to the SignalK delta stream
-// so KIP/Freeboard/dashboards see "did the last backup succeed, when is the next, anything wrong?"
-// without polling. The signalk-backup-server scheduler emits `backup-completed` events over SSE
-// (one per scheduled tick, including local + cloud outcome and disk free-space). This module
-// subscribes to that stream and translates each event into a delta on `vessels.<selfId>` plus
-// notifications under `notifications.server.backup.*`.
-//
-// Manual backups are deliberately not emitted (Dirk: "only fire on scheduled tasks").
-// The SSE stream itself filters those — backup-server only emits for scheduler ticks.
+// WHY: translate backup-server SSE events into SignalK deltas (issue #33); scheduled runs only.
 
 import type { BackupServerAPI } from './types.js'
 
@@ -32,6 +24,7 @@ const METRIC_BASE = 'server.backup'
 const NOTIF_BASE = 'notifications.server.backup'
 
 // Hysteresis band so a disk hovering at the boundary doesn't flap warn/normal repeatedly.
+// Threshold values are documented in README.md "SignalK paths published" — keep in sync.
 const STORAGE_LOW_WARN = 0.1 // <10% free → warn
 const STORAGE_LOW_ALERT = 0.05 // <5% free → alert
 const STORAGE_LOW_CLEAR = 0.12 // ≥12% free → clear
@@ -42,6 +35,9 @@ const TIER_INTERVAL_MS: Record<BackupTier, number> = {
   weekly: 7 * 24 * 60 * 60 * 1000,
   startup: 0 // never overdue: triggers only on server start
 }
+
+// Documented in README.md "SignalK paths published" — keep in sync.
+const OVERDUE_MULTIPLIER = 2
 
 interface DeltaEmitterState {
   app: BackupServerAPI
@@ -72,11 +68,7 @@ function isBackupCompleted(e: { type: string }): boolean {
 
 let state: DeltaEmitterState | null = null
 
-/**
- * Start subscribing to the backup-server's SSE stream and emitting deltas.
- * Idempotent — calling twice is a no-op. Survives the backup-server restarting
- * (managed-container restarts, image updates) by reconnecting with backoff.
- */
+// WHY idempotent + reconnect: container restart / image update during run shouldn't lose deltas.
 export function startSignalKEmitter(
   app: BackupServerAPI,
   baseUrl: string,
@@ -293,13 +285,13 @@ function evaluateOverdue(s: DeltaEmitterState, event: BackupCompletedEvent): voi
     if (interval === 0) continue
     const lastSuccess = s.lastSuccessByTier.get(tier)
     if (lastSuccess === undefined) continue // no baseline yet, give it one cycle
-    if (now - lastSuccess > 2 * interval) {
+    if (now - lastSuccess > OVERDUE_MULTIPLIER * interval) {
       overdue = tier
       break
     }
   }
   if (overdue) {
-    const msg = `Scheduled ${overdue} backup is overdue (last success >${(2 * TIER_INTERVAL_MS[overdue]) / 3_600_000}h ago)`
+    const msg = `Scheduled ${overdue} backup is overdue (last success >${(OVERDUE_MULTIPLIER * TIER_INTERVAL_MS[overdue]) / 3_600_000}h ago)`
     emitNotification(s, 'overdue', 'warn', msg, event.timestamp)
   } else {
     clearNotification(s, 'overdue')
