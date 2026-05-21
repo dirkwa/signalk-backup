@@ -193,19 +193,7 @@ export interface ContainerManagerApi {
   updateResources: (name: string, limits: ContainerResourceLimits) => Promise<UpdateResourcesResult>
   getResources: (name: string) => ContainerResourceLimits
   resolveContainerAddress: (name: string, port: number) => Promise<string | null>
-  /**
-   * Translate a container-internal absolute path (e.g. the value
-   * `app.getDataDirPath()` returns when SK is itself running in a
-   * container) into the host-side source the runtime daemon needs as a
-   * bind-mount source or to display to the operator. Returns `null`
-   * when SK is in a container and no SK mount covers the path, or when
-   * the runtime isn't initialised yet; callers should fall back to the
-   * original path in that case. Bare-metal callers always get a result
-   * whose `source` equals the input.
-   *
-   * Marked optional so the plugin keeps working against older
-   * signalk-container versions that don't expose this method.
-   */
+  // WHY: optional to support older signalk-container versions without this method.
   resolveHostPath?: (absPath: string) => Promise<{ source: string; subPath: string } | null>
   updates: UpdateServiceApi
 }

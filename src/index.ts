@@ -265,11 +265,7 @@ export default function (app: BackupServerAPI): Plugin {
           containerImage = `${BACKUP_IMAGE}:${resolveImageTag(currentSettings?.imageTag ?? 'auto')}`
         }
 
-        // pathMapping: translate backup-server container paths back to host paths for restore banners.
-        // When SK is itself in a container, resolveSignalkConfigRoot() returns
-        // the SK-container-internal view (e.g. /home/node/.signalk) — wrong for
-        // an operator-facing host path. Route through signalk-container's
-        // resolveHostPath to get the real host source.
+        // WHY: pathMapping.hostPath is operator-facing; resolveSignalkConfigRoot is SK-internal when SK is in a container.
         const managed = currentSettings?.managedContainer !== false
         const pathMapping = managed
           ? { containerPath: SK_MOUNT, hostPath: await resolveSignalkConfigRootOnHost(containers) }
@@ -723,20 +719,7 @@ export default function (app: BackupServerAPI): Plugin {
     return dbExportInFlight
   }
 
-  /**
-   * Resolve the SignalK config root from the **plugin's own filesystem
-   * view** — used for paths the plugin itself reads/writes (e.g.
-   * staging directories under `<root>/plugin-config-data/<pluginId>/`).
-   * Prefer the env var (authoritative when set) and fall back to
-   * walking up from getDataDirPath(), which signalk-server guarantees
-   * returns `<configRoot>/plugin-config-data/<pluginId>`.
-   *
-   * When SK is running in a container, this returns the SK-container-
-   * internal view of the config root, which is exactly what the plugin
-   * needs to `mkdir`/`stat`/etc. inside its own process.
-   * Do NOT use this value for the operator-facing `pathMapping.hostPath`
-   * — that needs `resolveSignalkConfigRootOnHost()`.
-   */
+  // WHY: returns SK's own filesystem view; use only for plugin-internal mkdir/stat — not for operator-facing host paths.
   function resolveSignalkConfigRoot(): string {
     const fromEnv = process.env['SIGNALK_NODE_CONFIG_DIR']
     if (fromEnv && fromEnv.length > 0) return fromEnv
@@ -744,18 +727,7 @@ export default function (app: BackupServerAPI): Plugin {
     return path.dirname(path.dirname(app.getDataDirPath()))
   }
 
-  /**
-   * Resolve the SignalK config root from the **host's filesystem view**
-   * — used for any value the host's runtime daemon or the operator
-   * will consume (e.g. the `pathMapping.hostPath` shown in restore
-   * banners). When SK is bare-metal this equals
-   * `resolveSignalkConfigRoot()`. When SK runs in a container we ask
-   * signalk-container to translate via `resolveHostPath()`. If
-   * resolution fails (older signalk-container without the method, a
-   * thrown error, no covering SK mount) we fall back to the plugin's
-   * own filesystem view — wrong for the in-container case, but at
-   * least it preserves the bare-metal value and matches prior behaviour.
-   */
+  // WHY: in-container SK needs signalk-container to translate the config root to a host-visible path; fall back to the local view on any failure so bare-metal and older signalk-container keep working.
   async function resolveSignalkConfigRootOnHost(
     containers: ContainerManagerApi | undefined
   ): Promise<string> {
@@ -763,7 +735,8 @@ export default function (app: BackupServerAPI): Plugin {
     if (!containers || typeof containers.resolveHostPath !== 'function') return local
     try {
       const resolved = await containers.resolveHostPath(local)
-      return resolved?.source ?? local
+      // WHY: join source + subPath to handle parent-directory mounts (subPath is "" for exact-match mounts).
+      return resolved ? path.join(resolved.source, resolved.subPath) : local
     } catch (err) {
       app.debug(
         `resolveSignalkConfigRootOnHost: resolveHostPath threw: ${errMsg(err)}; falling back to ${local}`
