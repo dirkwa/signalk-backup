@@ -732,8 +732,8 @@ export default function (app: BackupServerAPI): Plugin {
    * returns `<configRoot>/plugin-config-data/<pluginId>`.
    *
    * When SK is running in a container, this returns the SK-container-
-   * internal view (e.g. `/home/node/.signalk`), which is exactly what
-   * the plugin needs to `mkdir`/`stat`/etc. inside its own process.
+   * internal view of the config root, which is exactly what the plugin
+   * needs to `mkdir`/`stat`/etc. inside its own process.
    * Do NOT use this value for the operator-facing `pathMapping.hostPath`
    * — that needs `resolveSignalkConfigRootOnHost()`.
    */
