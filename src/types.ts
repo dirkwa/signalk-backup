@@ -193,6 +193,8 @@ export interface ContainerManagerApi {
   updateResources: (name: string, limits: ContainerResourceLimits) => Promise<UpdateResourcesResult>
   getResources: (name: string) => ContainerResourceLimits
   resolveContainerAddress: (name: string, port: number) => Promise<string | null>
+  // WHY: optional to support older signalk-container versions without this method.
+  resolveHostPath?: (absPath: string) => Promise<{ source: string; subPath: string } | null>
   updates: UpdateServiceApi
 }
 

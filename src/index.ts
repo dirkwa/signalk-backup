@@ -265,10 +265,10 @@ export default function (app: BackupServerAPI): Plugin {
           containerImage = `${BACKUP_IMAGE}:${resolveImageTag(currentSettings?.imageTag ?? 'auto')}`
         }
 
-        // pathMapping: translate backup-server container paths back to host paths for restore banners.
+        // WHY: pathMapping.hostPath is operator-facing; resolveSignalkConfigRoot is SK-internal when SK is in a container.
         const managed = currentSettings?.managedContainer !== false
         const pathMapping = managed
-          ? { containerPath: SK_MOUNT, hostPath: resolveSignalkConfigRoot() }
+          ? { containerPath: SK_MOUNT, hostPath: await resolveSignalkConfigRootOnHost(containers) }
           : undefined
 
         res.json({
@@ -719,17 +719,30 @@ export default function (app: BackupServerAPI): Plugin {
     return dbExportInFlight
   }
 
-  /**
-   * Resolve the host-visible SignalK config root. Prefer the env var
-   * (authoritative when set) and fall back to walking up from
-   * getDataDirPath(), which signalk-server guarantees returns
-   * `<configRoot>/plugin-config-data/<pluginId>`.
-   */
+  // WHY: returns SK's own filesystem view; use only for plugin-internal mkdir/stat — not for operator-facing host paths.
   function resolveSignalkConfigRoot(): string {
     const fromEnv = process.env['SIGNALK_NODE_CONFIG_DIR']
     if (fromEnv && fromEnv.length > 0) return fromEnv
     // dirname twice: <root>/plugin-config-data/signalk-backup → <root>
     return path.dirname(path.dirname(app.getDataDirPath()))
+  }
+
+  // WHY: in-container SK needs signalk-container to translate the config root to a host-visible path; fall back to the local view on any failure so bare-metal and older signalk-container keep working.
+  async function resolveSignalkConfigRootOnHost(
+    containers: ContainerManagerApi | undefined
+  ): Promise<string> {
+    const local = resolveSignalkConfigRoot()
+    if (!containers || typeof containers.resolveHostPath !== 'function') return local
+    try {
+      const resolved = await containers.resolveHostPath(local)
+      // WHY: join source + subPath to handle parent-directory mounts (subPath is "" for exact-match mounts).
+      return resolved ? path.join(resolved.source, resolved.subPath) : local
+    } catch (err) {
+      app.debug(
+        `resolveSignalkConfigRootOnHost: resolveHostPath threw: ${errMsg(err)}; falling back to ${local}`
+      )
+      return local
+    }
   }
 
   /**
