@@ -22,6 +22,14 @@ export const ConfigSchema = Type.Object({
     description:
       'Used only when managedContainer is disabled. e.g. http://192.168.1.50:3010. ' +
       'Leave blank when managing the container.'
+  }),
+  emitSignalKDeltas: Type.Boolean({
+    default: true,
+    title: 'Publish backup health to SignalK delta stream',
+    description:
+      'When enabled (default), the plugin publishes server.backup.* metrics and ' +
+      'notifications.server.backup.* alarms on each scheduled backup run. ' +
+      'Disable if you do not want these paths in your delta stream.'
   })
 })
 
@@ -42,6 +50,7 @@ export const SCHEMA_DEFAULTS: Config = {
   managedContainer: true,
   imageTag: 'auto',
   externalUrl: '',
+  emitSignalKDeltas: true,
   databaseExport: {
     questdb: false,
     grafana: false,
