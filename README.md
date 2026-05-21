@@ -15,6 +15,7 @@ The plugin runs a React webapp inside the SignalK Admin UI and orchestrates a se
 - **Database export pipeline** — opt-in exporters for [signalk-questdb](https://github.com/dirkwa/signalk-questdb), [signalk-grafana](https://github.com/dirkwa/signalk-grafana), and [signalk-database](https://github.com/dirkwa/signalk-database) periodically write consistent snapshots (parquet, SQLite checkpoint, provisioning YAML) to a staging dir that Kopia includes in every snapshot. Live DB files are excluded from filesystem backup to avoid torn-write hazards. The dedicated "Database exports" tab also extracts the export subtree from any historical backup without pulling the whole snapshot — a direct answer to "QuestDB shards bloat the full zip"
 - **First-run safe default** — installs with a daily local-only schedule already seeded; no surprise data egress
 - **Update detection** — checks ghcr.io for new container images via signalk-container's centralized update service
+- **SignalK delta publishing** — each scheduled run emits `server.backup.*` metric paths and `notifications.server.backup.*` alarms on the SignalK delta stream, so KIP / Freeboard / dashboards see backup health natively (see [SignalK paths published](#signalk-paths-published) below)
 
 ## Requirements
 
@@ -66,8 +67,31 @@ Most settings live in the **webapp** under Settings. The plugin's SignalK Admin 
 - `managedContainer` — let the plugin manage the backup-server container (default), or point at an external instance
 - `imageTag` — pin a specific version or use `auto` (default — resolves to the BACKUP_SERVER_VERSION constant)
 - `externalUrl` — only used when `managedContainer: false`
+- `emitSignalKDeltas` — publish backup health to the SignalK delta stream (default on; disable if you don't want these paths in your delta feed)
 - `databaseExport.{questdb, grafana, signalkDatabase}` — enable per-exporter (default off; users opt in once their DB plugin is producing data)
 - `databaseExport.intervalMinutes` — how often the export tick runs (5–1440)
+
+## SignalK paths published
+
+When `emitSignalKDeltas` is on (default), the plugin publishes one delta per **scheduled** backup run (manual backups stay out of the delta stream by design). All paths sit under `vessels.<selfId>`:
+
+| Path | Type | Units | Meaning |
+|---|---|---|---|
+| `server.backup.lastRunTimestamp` | RFC 3339 | — | When the last scheduled run started |
+| `server.backup.lastStatus` | string | — | `success` or `failure` (failure if either local Kopia or cloud sync failed) |
+| `server.backup.lastRunTier` | string | — | `hourly` / `daily` / `weekly` / `startup` |
+| `server.backup.lastRunBytes` | number | `B` | Snapshot size on disk |
+| `server.backup.nextScheduledTimestamp` | RFC 3339 | — | When the next scheduled run is due (earliest of all enabled tiers) |
+
+Notification paths (alarm shape: `state` / `method` / `message` / `timestamp`):
+
+| Path | State | Cleared when |
+|---|---|---|
+| `notifications.server.backup.failed` | `alert` (message names the failing destination) | next scheduled run succeeds |
+| `notifications.server.backup.overdue` | `warn` (last success > 2× tier interval) | a scheduled run for that tier succeeds |
+| `notifications.server.backup.storageLow` | `warn` < 10% free, `alert` < 5% | free space ≥ 12% (hysteresis) |
+
+`meta` (units, displayName, description) is emitted once on the first event so the data browser renders column labels correctly. To get human-readable byte values (`MB` / `GiB` / etc.) in the data browser, your SignalK server needs unit-preferences support for `B` — proposed upstream in [SignalK/signalk-server#2696](https://github.com/SignalK/signalk-server/pull/2696). Until that lands, the raw byte count is still emitted; clients can convert client-side.
 
 ## License
 
