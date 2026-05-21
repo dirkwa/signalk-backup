@@ -18,6 +18,8 @@ Listed in `package.json` under `signalk.requires`:
 - **signalk-container** — provides the global `__signalk_containerManager` API used to pull the image, start/stop the container, resolve its host:port binding, and check for image updates. All container ops in [src/index.ts](src/index.ts) go through it. Container mode refuses to start without it.
 - **signalk-questdb** — soft dependency. Only needed when `databaseExport.questdb: true`; the plugin pulls QuestDB tables as Parquet via signalk-questdb's `/api/full-export` route. If the route is missing the plugin's `detect()` returns false and the export tick is a no-op.
 
+**No `peerDependencies` block by design.** We declare the companion plugin in `signalk.requires` (the appstore-level signal) and check `globalThis.__signalk_containerManager` at runtime via `waitForContainerManager` — that's the source of truth. An npm `peerDependencies` entry like `signalk-container: ">=1.6.0"` rejects every signalk-container pre-release because npm's semver only matches pre-release versions whose `[major,minor,patch]` tuple is explicitly named in the range. We've been there; don't add it back.
+
 ## File layout
 
 - [src/index.ts](src/index.ts) — plugin entrypoint. Six responsibilities:
