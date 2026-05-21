@@ -1,12 +1,4 @@
-// WHY this file exists: GH issue #33 — publish backup health to the SignalK delta stream
-// so KIP/Freeboard/dashboards see "did the last backup succeed, when is the next, anything wrong?"
-// without polling. The signalk-backup-server scheduler emits `backup-completed` events over SSE
-// (one per scheduled tick, including local + cloud outcome and disk free-space). This module
-// subscribes to that stream and translates each event into a delta on `vessels.<selfId>` plus
-// notifications under `notifications.server.backup.*`.
-//
-// Manual backups are deliberately not emitted (Dirk: "only fire on scheduled tasks").
-// The SSE stream itself filters those — backup-server only emits for scheduler ticks.
+// WHY: translate backup-server SSE events into SignalK deltas (issue #33); scheduled runs only.
 
 import type { BackupServerAPI } from './types.js'
 
@@ -76,11 +68,7 @@ function isBackupCompleted(e: { type: string }): boolean {
 
 let state: DeltaEmitterState | null = null
 
-/**
- * Start subscribing to the backup-server's SSE stream and emitting deltas.
- * Idempotent — calling twice is a no-op. Survives the backup-server restarting
- * (managed-container restarts, image updates) by reconnecting with backoff.
- */
+// WHY idempotent + reconnect: container restart / image update during run shouldn't lose deltas.
 export function startSignalKEmitter(
   app: BackupServerAPI,
   baseUrl: string,
