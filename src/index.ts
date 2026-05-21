@@ -17,6 +17,7 @@ import { resolveImageTag } from './config/image-tag.js'
 import { runAllExports } from './database-export/index.js'
 import { registerStagingRoutes } from './database-export/staging-routes.js'
 import { registerHostRestoreRoutes } from './restore-host-write.js'
+import { startSignalKEmitter, stopSignalKEmitter } from './signalk-deltas.js'
 
 const BACKUP_IMAGE = 'ghcr.io/dirkwa/signalk-backup-server'
 const CONTAINER_NAME = 'signalk-backup-server'
@@ -215,6 +216,7 @@ export default function (app: BackupServerAPI): Plugin {
 
     async stop() {
       app.debug('Stopping signalk-backup')
+      stopSignalKEmitter()
       stopDbExportTimer()
       shutdownSmbDiscovery()
       client = null
@@ -545,6 +547,7 @@ export default function (app: BackupServerAPI): Plugin {
         await client.waitForReady(15_000)
         app.setPluginStatus(`Connected to external backup-server at ${url}`)
         await seedFirstRunSchedule(client)
+        startSignalKEmitter(app, url, { emitSignalKDeltas: settings.emitSignalKDeltas })
         if (
           settings.databaseExport.questdb ||
           settings.databaseExport.grafana ||
@@ -625,6 +628,9 @@ export default function (app: BackupServerAPI): Plugin {
       client = pending
 
       await seedFirstRunSchedule(client)
+      startSignalKEmitter(app, containerAddress, {
+        emitSignalKDeltas: settings.emitSignalKDeltas
+      })
       startDbExportTimer()
     } catch (err) {
       app.setPluginError(`Container startup failed: ${errMsg(err)}`)
