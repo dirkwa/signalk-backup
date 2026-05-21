@@ -84,21 +84,38 @@ function errMsg(err: unknown): string {
 /**
  * Resolve the actual host:port the backup-server container is reachable at.
  *
- * signalk-container exposes `resolveContainerAddress`, but its result comes
- * from a process-local port-allocation cache that can drift from the live
- * podman binding (TOCTOU between the in-process port probe and the actual
- * `podman create`). When that drift happens, the returned address points at
- * a port that nothing is listening on — every subsequent proxy request
- * returns ECONNREFUSED.
+ * `resolveContainerAddress` is the documented API and the authoritative
+ * answer in every deployment shape signalk-container 1.7.0+ supports —
+ * including the in-container "share SignalK's network namespace"
+ * (`container:<self-id>`) path, where the right URL is `127.0.0.1:3010`
+ * and no host-port mapping exists for `listContainers()` to parse.
  *
- * This helper queries `listContainers()` (which signalk-container reads
- * directly from podman/docker) and parses the live `Ports` field for the
- * binding mapped from the container's API_PORT. That's authoritative.
+ * We still fall through to a `listContainers().ports` parse for the
+ * legacy port-drift case that the previous order was guarding against:
+ * a process-local port cache disagreeing with the live podman binding
+ * (TOCTOU between the port probe and `podman create`). That happens in
+ * bare-metal-SK deployments only — never when SK is containerized — so
+ * trying the API first never trades correctness for safety.
  *
- * Falls back to `resolveContainerAddress` if the live binding can't be
- * parsed, so this is a strict superset of the documented contract.
+ * Returns null when neither path can produce an address (genuine
+ * misconfiguration; the caller throws a user-visible error).
  */
-async function resolveActualAddress(containers: ContainerManagerApi): Promise<string | null> {
+async function resolveActualAddress(
+  containers: ContainerManagerApi,
+  debug?: (msg: string) => void
+): Promise<string | null> {
+  try {
+    const apiAnswer = await containers.resolveContainerAddress(CONTAINER_NAME, API_PORT)
+    if (apiAnswer) return apiAnswer
+  } catch (err) {
+    debug?.(`resolveContainerAddress threw: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  // Fallback: parse listContainers() ports for the legacy bare-metal-SK
+  // port-drift case where the API's process-local cache could lag the
+  // live podman binding. Not needed for in-container deployments —
+  // signalk-container's `container:<self-id>` branch populates the API
+  // with the correct loopback answer.
   try {
     const list = await containers.listContainers()
     const found = list.find((c) => c.name === `sk-${CONTAINER_NAME}`)
@@ -115,10 +132,10 @@ async function resolveActualAddress(containers: ContainerManagerApi): Promise<st
         if (hostPart.includes(':')) return hostPart
       }
     }
-  } catch {
-    // fall through to the documented API
+  } catch (err) {
+    debug?.(`listContainers fallback threw: ${err instanceof Error ? err.message : String(err)}`)
   }
-  return containers.resolveContainerAddress(CONTAINER_NAME, API_PORT)
+  return null
 }
 
 export default function (app: BackupServerAPI): Plugin {
@@ -610,7 +627,9 @@ export default function (app: BackupServerAPI): Plugin {
         app.debug(`updates.register failed (non-fatal): ${errMsg(err)}`)
       }
 
-      const addr = await resolveActualAddress(containers)
+      const addr = await resolveActualAddress(containers, (m) => {
+        app.debug(m)
+      })
       if (!addr) {
         throw new Error('Could not resolve container address')
       }
