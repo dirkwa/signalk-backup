@@ -4,6 +4,10 @@
     "rootDir": ".",
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "webapp/src/components/cloud-sync-progress-display.ts"
+  ],
   "exclude": ["node_modules", "plugin"]
 }
