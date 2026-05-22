@@ -22,6 +22,7 @@ import {
   type CloudSyncProvider
 } from '../api'
 import { useApi } from '../useApi'
+import { CloudSyncProgress } from '../components/CloudSyncProgress'
 import { LocalConfigureForm } from '../components/LocalConfigureForm'
 import { SmbConnectForm } from '../components/SmbConnectForm'
 
@@ -222,9 +223,23 @@ function ConnectFlow({ onDone, onError }: { onDone: () => void; onError: (msg: s
 }
 
 export function Cloud() {
-  const cloud = useApi(() => api.cloudStatus(), { intervalMs: 5000 })
+  // Poll faster while a sync is running so the progress bar feels live. The
+  // interval is recomputed each render from the most recent cloud.data, so
+  // 5s→2s switch happens on the next render after `syncing` flips true.
+  const [cloudIntervalMs, setCloudIntervalMs] = useState(5000)
+  const cloud = useApi(() => api.cloudStatus(), { intervalMs: cloudIntervalMs })
   const local = useApi(() => api.localStatus(), { intervalMs: 5000 })
   const smb = useApi(() => api.smbStatus(), { intervalMs: 5000 })
+  const [syncStartedAt, setSyncStartedAt] = useState<number | null>(null)
+  useEffect(() => {
+    const isSyncing = cloud.data?.syncing === true
+    setCloudIntervalMs(isSyncing ? 2000 : 5000)
+    setSyncStartedAt((prev) => {
+      if (isSyncing && prev === null) return Date.now()
+      if (!isSyncing && prev !== null) return null
+      return prev
+    })
+  }, [cloud.data?.syncing])
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [busy, setBusy] = useState<'sync' | 'cancel' | 'disconnect' | 'config' | 'switch' | null>(
@@ -604,6 +619,10 @@ export function Cloud() {
                 </Col>
               )}
             </Row>
+
+            {cloud.data.syncing && (
+              <CloudSyncProgress syncProgress={cloud.data.syncProgress} startedAt={syncStartedAt} />
+            )}
 
             <div className="d-flex gap-2 align-items-center mb-3">
               {cloud.data.syncing ? (

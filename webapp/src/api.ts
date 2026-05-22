@@ -240,6 +240,17 @@ export interface LocalStatus {
   error?: string
 }
 
+export interface SyncProgress {
+  /** Total size of the local kopia repo in bytes (known up front from getRepoSize). */
+  totalBytes: number
+  /** Blobs processed so far (parsed from kopia stderr). */
+  processedBlobs?: number
+  /** Total blobs to sync (parsed from kopia stderr). */
+  totalBlobs?: number
+  /** Bytes processed so far (parsed from kopia stderr). */
+  processedBytes?: number
+}
+
 export interface CloudStatus {
   /** Active cloud provider. */
   provider: CloudSyncProvider
@@ -253,6 +264,8 @@ export interface CloudStatus {
   internetAvailable: boolean | null
   /** Human-readable label for the connected destination (e.g. gdrive email). */
   email?: string
+  /** Progress detail while a sync is in flight. Undefined when no sync is active. */
+  syncProgress?: SyncProgress
 }
 
 export type GDriveAuthState = 'idle' | 'pending' | 'completed' | 'failed'
