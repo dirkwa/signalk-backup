@@ -11,6 +11,12 @@ Two operating modes:
 - **Container mode** (default, `managedContainer: true`): the plugin asks `signalk-container` to ensure the backup-server container is running, then talks to it via HTTP.
 - **External mode** (`managedContainer: false`, `externalUrl` set): the plugin connects to a backup-server running elsewhere and skips container management entirely.
 
+## Architecture rules
+
+- **Webapp is an embedded panel, not a standalone shell.** Keyword `signalk-embeddable-webapp`. Built as a Vite Module Federation remote exposing `./AppPanel` (see [webapp/src/AppPanel.tsx](webapp/src/AppPanel.tsx)); the SignalK admin loads `/signalk-backup/remoteEntry.js` and renders us at `/admin/#/e/signalk_backup` (the safe-id is the package name with `-`/`@`/`/` replaced by `_`) with its sidebar still visible — that's the whole point of going through Module Federation rather than a standalone `signalk-webapp`. React 19 is shared as a singleton with `import: false` (without it, two React instances coexist and hooks return null at first paint); `react/jsx-runtime` and `react/jsx-dev-runtime` are shared with `import: true` because the admin doesn't pre-register those sub-paths in its share scope. Unlike signalk-updater, there's no iframe and no engine reverse proxy here — the backup UI **is** the panel directly, and all API calls already go through the existing same-origin `/plugins/signalk-backup/api/*` proxy. No `<meta name="api-base">` injection is needed.
+- **Don't write to `window.location.hash` from the panel.** The SignalK admin owns the hash for its own routing (`#/e/<safeId>`). Tab state in `webapp/src/App.tsx` is in-memory `useState` — see the comment there. Deep-link bookmarks to a specific tab are not supported in embedded mode; that's an accepted trade-off.
+- **`webapp/index.html` and `webapp/src/main.tsx` are for standalone `npm run dev` only.** In embedded production mode the admin loads `remoteEntry.js` directly, not `index.html`. Both files stay so the dev loop still serves a themed SPA at `:5173`.
+
 ## Companion plugins (hard runtime dependencies)
 
 Listed in `package.json` under `signalk.requires`:
@@ -47,7 +53,7 @@ Listed in `package.json` under `signalk.requires`:
 - [src/config/schema.ts](src/config/schema.ts) — typebox schema → Signal K admin UI form. Adding a config field starts here; **also** add it to `SCHEMA_DEFAULTS` (see Gotchas).
 - [src/config/image-tag.ts](src/config/image-tag.ts) — `imageTag: "auto"` resolves to the hand-bumped `BACKUP_SERVER_VERSION` constant. Plugin and server versions are decoupled — bumping that constant is a deliberate act in its own PR.
 - [src/types.ts](src/types.ts) — hand-rolled mirror of signalk-container's API. Loose coupling: this plugin never imports signalk-container at compile time, only at runtime via `globalThis`.
-- [webapp/](webapp/) — React 19 + Vite + reactstrap SPA mounted at `/signalk-backup/`. Tabs: Dashboard, Backups, Database exports, Cloud sync, Settings. All HTTP via `/plugins/signalk-backup/api/*` (same SignalK origin). `webapp/src/api.ts` is the typed client; `webapp/src/components/` holds the shared widgets (`BackupBrowser`, `PartialRestoreModal`, `PartialRestoreBanner`); each top-level tab is a file under `webapp/src/views/`.
+- [webapp/](webapp/) — React 19 + Vite + reactstrap. Module Federation remote exposing `./AppPanel` (see [webapp/src/AppPanel.tsx](webapp/src/AppPanel.tsx)); the SignalK admin loads `/signalk-backup/remoteEntry.js` and renders the panel inside its own layout at `/admin/#/e/signalk_backup`. Tabs: Dashboard, Backups, Database exports, Cloud sync, Settings. All HTTP via `/plugins/signalk-backup/api/*` (same SignalK origin). `webapp/src/api.ts` is the typed client; `webapp/src/components/` holds the shared widgets (`BackupBrowser`, `PartialRestoreModal`, `PartialRestoreBanner`); each top-level tab is a file under `webapp/src/views/`. `webapp/index.html` + `webapp/src/main.tsx` are kept for standalone `npm run dev` only.
 - [test/](test/) — vitest. Pure unit tests: schema validation, exporter behaviour against a mocked `fetch`, staging-route path-safety against a temp dir + supertest, host-restore path resolution and ZIP-entry safety. There is no integration harness for the React webapp; manual verification is via the live SignalK server (see "Local dev loop").
 
 ## Build, lint, test
