@@ -13,7 +13,6 @@ const pkgVersion = (
   JSON.parse(readFileSync(resolve(here, 'package.json'), 'utf-8')) as { version: string }
 ).version
 
-// Module Federation remote exposing ./AppPanel for embedding at /admin/#/e/signalk_backup; see AGENTS.md.
 export default defineConfig({
   plugins: [
     react(),
