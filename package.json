@@ -19,7 +19,7 @@
   },
   "keywords": [
     "signalk-node-server-plugin",
-    "signalk-webapp",
+    "signalk-embeddable-webapp",
     "signalk-category-utility",
     "backup",
     "kopia",
@@ -29,10 +29,6 @@
   "signalk": {
     "displayName": "Backup",
     "appIcon": "icon.svg",
-    "webapp": {
-      "name": "Backup",
-      "description": "Scheduled deduplicated backups to local storage and Google Drive"
-    },
     "screenshots": [
       "./docs/screenshots/1_signalk-backup_dashboard.png",
       "./docs/screenshots/2_signalk-backup_backups.png",
@@ -62,6 +58,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@module-federation/vite": "^1.15.0",
     "@signalk/server-admin-ui-dependencies": "^2.23.0",
     "@signalk/server-api": "^2.24.0",
     "@types/express": "^5.0.0",

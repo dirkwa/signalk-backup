@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Container, Nav, NavItem, NavLink } from 'reactstrap'
 import { Dashboard } from './views/Dashboard'
 import { Backups } from './views/Backups'
@@ -16,32 +16,9 @@ const ROUTES: { id: Route; label: string }[] = [
   { id: 'settings', label: 'Settings' }
 ]
 
-// Hash-routing keeps us off react-router and avoids the history API
-// quirks behind SignalK's /signalk-backup/ mount prefix.
-function parseHash(hash: string): Route {
-  const trimmed = hash.replace(/^#\/?/, '')
-  return ROUTES.some((r) => r.id === trimmed) ? (trimmed as Route) : 'dashboard'
-}
-
-function useHashRoute(): [Route, (r: Route) => void] {
-  const [route, setRoute] = useState<Route>(() => parseHash(window.location.hash))
-  useEffect(() => {
-    const onChange = (): void => {
-      setRoute(parseHash(window.location.hash))
-    }
-    window.addEventListener('hashchange', onChange)
-    return () => {
-      window.removeEventListener('hashchange', onChange)
-    }
-  }, [])
-  const navigate = (r: Route): void => {
-    window.location.hash = `#/${r}`
-  }
-  return [route, navigate]
-}
-
+// In-memory tab state; admin owns hash (#/e/signalk_backup) so we can't write to it without breaking navigation.
 export function App() {
-  const [route, navigate] = useHashRoute()
+  const [route, setRoute] = useState<Route>('dashboard')
 
   return (
     <Container className="py-4">
@@ -55,11 +32,11 @@ export function App() {
         {ROUTES.map((r) => (
           <NavItem key={r.id}>
             <NavLink
-              href={`#/${r.id}`}
+              href="#"
               active={route === r.id}
               onClick={(e) => {
                 e.preventDefault()
-                navigate(r.id)
+                setRoute(r.id)
               }}
             >
               {r.label}

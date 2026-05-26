@@ -11,6 +11,11 @@ Two operating modes:
 - **Container mode** (default, `managedContainer: true`): the plugin asks `signalk-container` to ensure the backup-server container is running, then talks to it via HTTP.
 - **External mode** (`managedContainer: false`, `externalUrl` set): the plugin connects to a backup-server running elsewhere and skips container management entirely.
 
+## Architecture rules
+
+- **Webapp is an embedded panel, not a standalone shell.** Keyword `signalk-embeddable-webapp`. Built as a Vite Module Federation remote exposing `./AppPanel` so the admin renders us inside its own layout with the sidebar still visible. React must be shared as a singleton with the admin (`import: false` on `react`/`react-dom`) — without it, two React instances coexist and hooks return null at first paint. `react/jsx-runtime` and `react/jsx-dev-runtime` must NOT use the same deferred-host pattern: the admin doesn't pre-register them in its share scope, so they're shared with a bundled fallback. See `vite.config.ts` for the exact share map.
+- **The panel must not write to `window.location.hash`.** The admin owns the hash for its own routing. Tab state in `webapp/src/App.tsx` is in-memory only.
+
 ## Companion plugins (hard runtime dependencies)
 
 Listed in `package.json` under `signalk.requires`:
@@ -47,7 +52,7 @@ Listed in `package.json` under `signalk.requires`:
 - [src/config/schema.ts](src/config/schema.ts) — typebox schema → Signal K admin UI form. Adding a config field starts here; **also** add it to `SCHEMA_DEFAULTS` (see Gotchas).
 - [src/config/image-tag.ts](src/config/image-tag.ts) — `imageTag: "auto"` resolves to the hand-bumped `BACKUP_SERVER_VERSION` constant. Plugin and server versions are decoupled — bumping that constant is a deliberate act in its own PR.
 - [src/types.ts](src/types.ts) — hand-rolled mirror of signalk-container's API. Loose coupling: this plugin never imports signalk-container at compile time, only at runtime via `globalThis`.
-- [webapp/](webapp/) — React 19 + Vite + reactstrap SPA mounted at `/signalk-backup/`. Tabs: Dashboard, Backups, Database exports, Cloud sync, Settings. All HTTP via `/plugins/signalk-backup/api/*` (same SignalK origin). `webapp/src/api.ts` is the typed client; `webapp/src/components/` holds the shared widgets (`BackupBrowser`, `PartialRestoreModal`, `PartialRestoreBanner`); each top-level tab is a file under `webapp/src/views/`.
+- [webapp/](webapp/) — React 19 + Vite + reactstrap. Module Federation remote (see [webapp/src/AppPanel.tsx](webapp/src/AppPanel.tsx)) embedded in the SignalK admin shell — see Architecture rules above. Tabs: Dashboard, Backups, Database exports, Cloud sync, Settings. All HTTP via `/plugins/signalk-backup/api/*` (same SignalK origin). `webapp/src/api.ts` is the typed client; `webapp/src/components/` holds the shared widgets (`BackupBrowser`, `PartialRestoreModal`, `PartialRestoreBanner`); each top-level tab is a file under `webapp/src/views/`. `webapp/index.html` and `webapp/src/main.tsx` are kept for standalone `npm run dev` only.
 - [test/](test/) — vitest. Pure unit tests: schema validation, exporter behaviour against a mocked `fetch`, staging-route path-safety against a temp dir + supertest, host-restore path resolution and ZIP-entry safety. There is no integration harness for the React webapp; manual verification is via the live SignalK server (see "Local dev loop").
 
 ## Build, lint, test
