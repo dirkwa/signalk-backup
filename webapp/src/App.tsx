@@ -16,11 +16,7 @@ const ROUTES: { id: Route; label: string }[] = [
   { id: 'settings', label: 'Settings' }
 ]
 
-// In-memory tab state. We deliberately do NOT use window.location.hash:
-// the SignalK admin owns the hash (#/e/signalk_backup) for its own routing
-// and writing to it from inside the embedded panel kicks the user off the
-// page. Tab choice is per-session; deep-link bookmarks to a specific tab
-// are not supported in embedded mode.
+// In-memory tab state; admin owns hash (#/e/signalk_backup) so we can't write to it without breaking navigation.
 export function App() {
   const [route, setRoute] = useState<Route>('dashboard')
 
