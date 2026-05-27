@@ -185,6 +185,13 @@ export interface ContainerManagerApi {
     config: ContainerConfig,
     options?: EnsureRunningOptions
   ) => Promise<void>
+  // WHY: optional — only present in signalk-container 1.12.0+.
+  // Force-recreate the container regardless of drift detection.
+  recreate?: (
+    name: string,
+    config: ContainerConfig,
+    options?: EnsureRunningOptions
+  ) => Promise<void>
   start: (name: string) => Promise<void>
   stop: (name: string) => Promise<void>
   remove: (name: string) => Promise<void>
