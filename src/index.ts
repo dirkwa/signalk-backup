@@ -337,20 +337,31 @@ export default function (app: BackupServerAPI): Plugin {
         const tag = resolveImageTag(requestedTag)
 
         try {
-          app.setPluginStatus(`Pulling ${BACKUP_IMAGE}:${tag}...`)
-          await containers.pullImage(`${BACKUP_IMAGE}:${tag}`)
-
-          app.setPluginStatus('Recreating signalk-backup-server container...')
-          await containers.remove(CONTAINER_NAME)
-          try {
-            await containers.ensureRunning(CONTAINER_NAME, buildContainerConfig(tag), {
+          app.setPluginStatus(`Recreating signalk-backup-server with ${BACKUP_IMAGE}:${tag}...`)
+          if (containers.recreate) {
+            // 1.12.0+ — single primitive handles pull + remove + create
+            // with consistent error semantics (any failure leaves the
+            // container in a known state, not the "removed but recreate
+            // failed" limbo the old triplet could produce).
+            await containers.recreate(CONTAINER_NAME, buildContainerConfig(tag), {
               onVolumeIssue
             })
-          } catch (recreateErr) {
-            const msg = `Container removed but recreation failed: ${errMsg(recreateErr)}. Click Update again to retry.`
-            app.setPluginError(msg)
-            res.status(500).json({ error: msg })
-            return
+          } else {
+            // signalk-container < 1.12.0 fallback: original pull + remove
+            // + ensureRunning triplet. Remove this branch when the plugin
+            // bumps its minimum signalk-container version.
+            await containers.pullImage(`${BACKUP_IMAGE}:${tag}`)
+            await containers.remove(CONTAINER_NAME)
+            try {
+              await containers.ensureRunning(CONTAINER_NAME, buildContainerConfig(tag), {
+                onVolumeIssue
+              })
+            } catch (recreateErr) {
+              const msg = `Container removed but recreation failed: ${errMsg(recreateErr)}. Click Update again to retry.`
+              app.setPluginError(msg)
+              res.status(500).json({ error: msg })
+              return
+            }
           }
 
           // Persist requestedTag not resolved tag: saving "auto" preserves auto-tracking across upgrades.
@@ -607,10 +618,35 @@ export default function (app: BackupServerAPI): Plugin {
     const resolvedTag = resolveImageTag(settings.imageTag)
 
     try {
-      app.setPluginStatus(`Starting ${BACKUP_IMAGE}:${resolvedTag}...`)
-      await containers.ensureRunning(CONTAINER_NAME, buildContainerConfig(resolvedTag), {
-        onVolumeIssue
-      })
+      // Self-heal: if a live container exists with a different image
+      // than the just-resolved tag (typical after a plugin upgrade that
+      // bumped BACKUP_SERVER_VERSION), force-recreate via the explicit
+      // primitive rather than relying on ensureRunning's drift detector.
+      // Requires signalk-container >= 1.12.0; older installs fall through
+      // to ensureRunning which still recreates on drift in 1.6.0+.
+      const desiredImage = `${BACKUP_IMAGE}:${resolvedTag}`
+      let usedRecreate = false
+      if (containers.recreate) {
+        try {
+          const live = await containers.listContainers()
+          const found = live.find((c) => c.name === `sk-${CONTAINER_NAME}`)
+          if (found && found.image !== desiredImage) {
+            app.setPluginStatus(`Recreating ${found.image} → ${desiredImage}...`)
+            await containers.recreate(CONTAINER_NAME, buildContainerConfig(resolvedTag), {
+              onVolumeIssue
+            })
+            usedRecreate = true
+          }
+        } catch (probeErr) {
+          app.debug(`self-heal probe failed (non-fatal): ${errMsg(probeErr)}`)
+        }
+      }
+      if (!usedRecreate) {
+        app.setPluginStatus(`Starting ${desiredImage}...`)
+        await containers.ensureRunning(CONTAINER_NAME, buildContainerConfig(resolvedTag), {
+          onVolumeIssue
+        })
+      }
 
       // Register with the central update service so users see "update available"
       // badges in the signalk-container config panel without us writing custom
