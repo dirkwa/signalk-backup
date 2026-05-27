@@ -11,6 +11,7 @@ import {
 } from 'reactstrap'
 import {
   api,
+  ApiError,
   formatBytes,
   type BackupMetadata,
   type BackupTreeEntry,
@@ -44,6 +45,9 @@ interface FolderState {
   // null while loading, string when an error happened, array when loaded.
   entries: BackupTreeEntry[] | null
   error: string | null
+  // ENTRY_NOT_FOUND etc — lets FolderNode render a friendlier state for
+  // the scoped-root case without regexing the message.
+  errorCode: string | null
 }
 
 // Per-folder lazy cache keyed by full path-from-root (or '' for root).
@@ -89,19 +93,24 @@ export function BackupBrowser({
   const loadFolder = useCallback(
     async (folderPath: string): Promise<void> => {
       const gen = requestGenRef.current
-      setCache((c) => ({ ...c, [folderPath]: { entries: null, error: null } }))
+      setCache((c) => ({
+        ...c,
+        [folderPath]: { entries: null, error: null, errorCode: null }
+      }))
       try {
         const res = await api.listBackupTree(backup.id, folderPath)
         if (gen !== requestGenRef.current) return
-        setCache((c) => ({ ...c, [folderPath]: { entries: res.entries, error: null } }))
-      } catch (err) {
-        if (gen !== requestGenRef.current) return
         setCache((c) => ({
           ...c,
-          [folderPath]: {
-            entries: null,
-            error: err instanceof Error ? err.message : String(err)
-          }
+          [folderPath]: { entries: res.entries, error: null, errorCode: null }
+        }))
+      } catch (err) {
+        if (gen !== requestGenRef.current) return
+        const message = err instanceof Error ? err.message : String(err)
+        const errorCode = err instanceof ApiError ? (err.code ?? null) : null
+        setCache((c) => ({
+          ...c,
+          [folderPath]: { entries: null, error: message, errorCode }
         }))
       }
     },
@@ -157,6 +166,7 @@ export function BackupBrowser({
         <FolderNode
           backupId={backup.id}
           path={rootPath}
+          rootPath={rootPath}
           depth={0}
           cache={cache}
           expanded={expanded}
@@ -191,6 +201,7 @@ export function BackupBrowser({
 interface NodeProps {
   backupId: string
   path: string
+  rootPath: string
   depth: number
   cache: Cache
   expanded: Set<string>
@@ -203,6 +214,7 @@ interface NodeProps {
 function FolderNode({
   backupId,
   path: folderPath,
+  rootPath,
   depth,
   cache,
   expanded,
@@ -221,6 +233,26 @@ function FolderNode({
     )
   }
   if (state.error) {
+    // Friendlier empty-state when the scoped root subtree isn't in the
+    // snapshot — typical case: the Database Exports browser opened
+    // against a snapshot taken before any DB exports were staged. A
+    // nested folder hitting the same error keeps the red alert + Retry
+    // because that's a genuine surprise.
+    const isScopedRootMissing =
+      state.errorCode === 'ENTRY_NOT_FOUND' &&
+      depth === 0 &&
+      folderPath === rootPath &&
+      rootPath !== ''
+    if (isScopedRootMissing) {
+      return (
+        <div className="ps-3 py-3 text-muted small">
+          <div>This backup doesn’t contain any files at this path.</div>
+          <div className="mt-1">
+            The subtree <code>{rootPath}/</code> may not have existed when this snapshot was taken.
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="ps-3 py-1">
         <Alert color="danger" className="mb-1 py-1 small">
@@ -315,6 +347,7 @@ function FolderNode({
               <FolderNode
                 backupId={backupId}
                 path={fullPath}
+                rootPath={rootPath}
                 depth={depth + 1}
                 cache={cache}
                 expanded={expanded}

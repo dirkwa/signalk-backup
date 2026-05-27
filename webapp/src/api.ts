@@ -360,25 +360,42 @@ export class PartialRestoreConflictError extends Error {
   }
 }
 
+// Lets callers branch on the structured server error (e.g. ENTRY_NOT_FOUND
+// for the backup browser) instead of regexing the message string.
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code: string | undefined
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(API_BASE + path, init)
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`${path} → ${res.status}: ${text.slice(0, 200)}`)
-  }
-  const body = (await res.json()) as unknown
-  // Backup-server wraps responses in { success, data | error }. Unwrap
-  // success → return data; success === false → throw with the server's
-  // error message so the UI sees a real Error rather than a malformed T.
+  const body = (await res.json().catch(() => null)) as unknown
+  // Backup-server wraps responses in { success, data | error } on both
+  // success and failure. Parse the envelope first so non-2xx responses
+  // surface the structured `error.code` to callers — without this, an
+  // !res.ok branch threw on the raw text and ENTRY_NOT_FOUND was buried
+  // in a stringified body that the UI rendered verbatim.
   if (body !== null && typeof body === 'object' && 'success' in body) {
     const env = body as ApiEnvelope<T>
     if (env.success === false) {
-      const code = env.error?.code ? ` [${env.error.code}]` : ''
-      throw new Error(`${path}${code}: ${env.error?.message ?? 'unknown server error'}`)
+      const code = env.error?.code
+      const message = env.error?.message ?? 'unknown server error'
+      throw new ApiError(message, res.status, code)
     }
     if (env.success === true && 'data' in body) {
       return env.data as T
     }
+  }
+  if (!res.ok) {
+    // Non-envelope error (HTML 404 from upstream, network blip, etc.) —
+    // fall back to a path+status message so the UI still gets something.
+    throw new ApiError(`HTTP ${res.status}`, res.status, undefined)
   }
   return body as T
 }
