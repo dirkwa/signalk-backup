@@ -71,6 +71,16 @@ Most settings live in the **webapp** under Settings. The plugin's SignalK Admin 
 - `databaseExport.{questdb, grafana, signalkDatabase}` — enable per-exporter (default off; users opt in once their DB plugin is producing data)
 - `databaseExport.intervalMinutes` — how often the export tick runs (5–1440)
 
+## Backup password
+
+Your backups are always encrypted. Out of the box the engine uses a built-in default password, so backups work immediately with no setup. You can set your own password from the webapp under **Settings** at any time.
+
+Changing the password **re-keys your existing repository in place** — your existing backups are preserved, not lost. The change is rolled back automatically if anything goes wrong, so the previous password keeps working and you can never be locked out of your own backups.
+
+If you use **cloud sync** (Google Drive or SMB), the cloud copy shares the same password. After you change it, the plugin starts one sync to bring the cloud copy up to date — you don't need to re-upload everything. Until that sync finishes, don't restore from the cloud or delete your old cloud backups (they're your safety net if the sync is interrupted).
+
+If you ever see a `found existing data in storage location` error, your backups are safe — the engine just couldn't open the repository (usually a password mismatch). See [Repository recovery](https://github.com/dirkwa/signalk-backup-server#repository-recovery) in the backup-server docs.
+
 ## SignalK paths published
 
 When `emitSignalKDeltas` is on (default), the plugin publishes one delta per **scheduled** backup run (manual backups stay out of the delta stream by design). All paths sit under `vessels.<selfId>`:
