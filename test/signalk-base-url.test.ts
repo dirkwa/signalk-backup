@@ -62,11 +62,13 @@ describe('resolveSignalkBaseUrl', () => {
     )
   })
 
-  // Mirrors the server's `Number(x) || fallback`, which discards these.
   it('skips unusable port values and falls through', () => {
     expect(resolveSignalkBaseUrl(app({ port: 0 }))).toBe('http://127.0.0.1:3000')
     expect(resolveSignalkBaseUrl(app({ port: '' }))).toBe('http://127.0.0.1:3000')
     expect(resolveSignalkBaseUrl(app({ port: 'not-a-port' }))).toBe('http://127.0.0.1:3000')
+    expect(resolveSignalkBaseUrl(app({ port: 1.5 }))).toBe('http://127.0.0.1:3000')
+    expect(resolveSignalkBaseUrl(app({ port: 65536 }))).toBe('http://127.0.0.1:3000')
+    expect(resolveSignalkBaseUrl(app({ port: -80 }))).toBe('http://127.0.0.1:3000')
   })
 
   it('ignores a blank PORT env and uses settings.port', () => {

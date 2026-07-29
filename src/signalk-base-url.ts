@@ -1,19 +1,8 @@
-/**
- * Resolve the loopback URL of the SignalK server we are running inside.
- *
- * Used to reach source plugins' HTTP routes (signalk-questdb,
- * signalk-grafana) for the database-export tick.
- *
- * Mirrors the server's own precedence in signalk-server/src/ports.ts:
- *   getHttpPort = process.env.PORT || settings.port || 3000
- *   getSslPort  = process.env.SSLPORT || settings.sslport || 3443
- *   primary port = settings.ssl ? sslPort : httpPort
- *
- * Reading only process.env.PORT (as this plugin used to) misses the
- * settings.json tier, which is how most installs set their port — the
- * export tick then probed a dead port and every exporter's detect()
- * silently returned false.
- */
+// Loopback URL of the SignalK server we run inside, used to reach source
+// plugins' export routes. Precedence mirrors signalk-server/src/ports.ts:
+// env PORT/SSLPORT, then settings.port/sslport, then 3000/3443. Reading only
+// env PORT misses the settings.json tier most installs use, which left the
+// export tick probing a dead port with every detect() silently false (#90).
 
 /** The subset of SignalK's `app.config` we depend on; `ServerAPI` doesn't declare it publicly. */
 export interface SignalKPortConfig {
@@ -30,11 +19,12 @@ export interface SignalKPortConfig {
 const DEFAULT_HTTP_PORT = 3000
 const DEFAULT_SSL_PORT = 3443
 
-// Mirrors the server's `Number(x) || fallback`: rejects 0, NaN and blanks.
+// Like the server's `Number(x) || fallback`, but also rejects fractional and
+// out-of-range values rather than building a URL nothing can connect to.
 function firstUsablePort(candidates: Array<number | string | undefined>, fallback: number): number {
   for (const c of candidates) {
     const n = Number(c)
-    if (Number.isFinite(n) && n > 0) return n
+    if (Number.isInteger(n) && n >= 1 && n <= 65535) return n
   }
   return fallback
 }

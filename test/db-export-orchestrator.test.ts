@@ -4,12 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runAllExports } from '../src/database-export/index.js'
 
-/**
- * The orchestrator instantiates its exporters internally, so we drive it
- * through the only seam available: a mocked global fetch. An unreachable
- * base URL is exactly the issue-#90 failure — every detect() returns
- * false and the tick produces nothing.
- */
+// Exporters are constructed internally, so global fetch is the only seam; an
+// unreachable base URL reproduces #90 exactly.
 describe('runAllExports', () => {
   let dir: string
   const realFetch = globalThis.fetch
@@ -52,5 +48,26 @@ describe('runAllExports', () => {
     })
 
     expect(warnings).toEqual([])
+  })
+
+  it('reports every unreachable exporter, not just the first', async () => {
+    globalThis.fetch = () => {
+      throw new Error('kaboom')
+    }
+
+    const warnings: string[] = []
+    const results = await runAllExports({
+      signalkConfigRoot: dir,
+      signalkBaseUrl: 'http://127.0.0.1:3000',
+      warn: (m) => warnings.push(m),
+      enabled: { questdb: true, grafana: true, signalkDatabase: true }
+    })
+
+    expect(results).toEqual([])
+    expect(warnings).toHaveLength(3)
+    const joined = warnings.join('\n')
+    expect(joined).toContain('signalk-questdb')
+    expect(joined).toContain('signalk-grafana')
+    expect(joined).toContain('signalk-database')
   })
 })
