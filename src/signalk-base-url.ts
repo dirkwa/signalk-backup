@@ -4,7 +4,7 @@
 // env PORT misses the settings.json tier most installs use, which left the
 // export tick probing a dead port with every detect() silently false (#90).
 
-/** The subset of SignalK's `app.config` we depend on; `ServerAPI` doesn't declare it publicly. */
+// Subset of app.config we read; ServerAPI doesn't declare it publicly.
 export interface SignalKPortConfig {
   config?: {
     settings?: {
@@ -15,7 +15,7 @@ export interface SignalKPortConfig {
   }
 }
 
-/** Server defaults from signalk-server/src/ports.ts. */
+// Server defaults from signalk-server/src/ports.ts.
 const DEFAULT_HTTP_PORT = 3000
 const DEFAULT_SSL_PORT = 3443
 
@@ -29,7 +29,7 @@ function firstUsablePort(candidates: Array<number | string | undefined>, fallbac
   return fallback
 }
 
-/** Loopback base URL, no trailing slash. */
+// Loopback base URL, no trailing slash.
 export function resolveSignalkBaseUrl(app: object): string {
   // `ServerAPI` shares no declared members with SignalKPortConfig (all of
   // ours are optional), so TS rejects it as a weak-type argument. Narrow
