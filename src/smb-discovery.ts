@@ -1,7 +1,9 @@
 // Lives plugin-side (not in the container) so the SignalK process's
 // network is what determines whether multicast reaches the LAN.
 
-import { Bonjour } from 'bonjour-service'
+// Default import, not named: 1.4.x uses `export = Bonjour` with a merged
+// namespace, so the named export is value-only and unusable as a type (TS2749).
+import Bonjour from 'bonjour-service'
 
 export interface SmbHost {
   /** mDNS service name, typically the device's friendly name. */
