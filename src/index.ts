@@ -18,6 +18,7 @@ import { runAllExports } from './database-export/index.js'
 import { registerStagingRoutes } from './database-export/staging-routes.js'
 import { registerHostRestoreRoutes } from './restore-host-write.js'
 import { startSignalKEmitter, stopSignalKEmitter } from './signalk-deltas.js'
+import { resolveSignalkBaseUrl as resolveBaseUrl } from './signalk-base-url.js'
 
 const BACKUP_IMAGE = 'ghcr.io/dirkwa/signalk-backup-server'
 const CONTAINER_NAME = 'signalk-backup-server'
@@ -745,6 +746,9 @@ export default function (app: BackupServerAPI): Plugin {
       log: (msg) => {
         app.debug(msg)
       },
+      warn: (msg) => {
+        app.error(msg)
+      },
       enabled: {
         questdb: dbCfg.questdb,
         grafana: dbCfg.grafana,
@@ -800,14 +804,8 @@ export default function (app: BackupServerAPI): Plugin {
     }
   }
 
-  /**
-   * Resolve the SignalK loopback URL — used to talk to source plugins
-   * (e.g. signalk-questdb) over HTTP. Same convention used by
-   * signalk-questdb itself: PORT env var with 3000 as default.
-   */
   function resolveSignalkBaseUrl(): string {
-    const port = process.env['PORT'] ?? '3000'
-    return `http://127.0.0.1:${port}`
+    return resolveBaseUrl(app)
   }
 
   async function seedFirstRunSchedule(c: BackupClient): Promise<void> {

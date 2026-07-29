@@ -26,6 +26,9 @@ export interface ExportOrchestratorOptions {
   signalkBaseUrl: string
   /** Optional debug logger. */
   log?: (msg: string) => void
+  // Operator-visible sink: an enabled export that produced nothing must not be
+  // debug-only, which made a dead base URL look like "working fine" (#90).
+  warn?: (msg: string) => void
   // Missing key = disabled, matching SCHEMA_DEFAULTS.databaseExport.
   enabled?: { questdb?: boolean; grafana?: boolean; signalkDatabase?: boolean }
 }
@@ -73,7 +76,23 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
 
   const results: ExportResult[] = []
   for (const exporter of exporters) {
-    if (!(await exporter.detect())) {
+    // A throwing detect() must not strand the exporters queued behind it.
+    let detected: boolean
+    try {
+      detected = await exporter.detect()
+    } catch (err) {
+      opts.warn?.(
+        `[db-export] ${exporter.pluginId} detection failed: ` +
+          (err instanceof Error ? err.message : String(err))
+      )
+      continue
+    }
+    if (!detected) {
+      const warning =
+        `${exporter.pluginId} export is enabled but the plugin did not respond at ` +
+        `${opts.signalkBaseUrl} — nothing was exported. Check that the plugin is ` +
+        `installed and enabled, and that this is the URL SignalK actually listens on.`
+      opts.warn?.(`[db-export] ${warning}`)
       opts.log?.(`[db-export] skipping ${exporter.pluginId} (detect failed)`)
       continue
     }
