@@ -26,6 +26,13 @@ export interface ExportOrchestratorOptions {
   signalkBaseUrl: string
   /** Optional debug logger. */
   log?: (msg: string) => void
+  /**
+   * Operator-visible warning sink. A detect() miss means an export the
+   * user explicitly enabled produced nothing, so it must not be
+   * debug-only — that made a dead base URL indistinguishable from
+   * "working fine" (issue #90).
+   */
+  warn?: (msg: string) => void
   // Missing key = disabled, matching SCHEMA_DEFAULTS.databaseExport.
   enabled?: { questdb?: boolean; grafana?: boolean; signalkDatabase?: boolean }
 }
@@ -74,6 +81,11 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
   const results: ExportResult[] = []
   for (const exporter of exporters) {
     if (!(await exporter.detect())) {
+      const warning =
+        `${exporter.pluginId} export is enabled but the plugin did not respond at ` +
+        `${opts.signalkBaseUrl} — nothing was exported. Check that the plugin is ` +
+        `installed and enabled, and that this is the URL SignalK actually listens on.`
+      opts.warn?.(`[db-export] ${warning}`)
       opts.log?.(`[db-export] skipping ${exporter.pluginId} (detect failed)`)
       continue
     }
