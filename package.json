@@ -58,7 +58,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@module-federation/vite": "^1.15.0",
+    "@module-federation/vite": "~1.15.5",
     "@signalk/server-admin-ui-dependencies": "^2.23.0",
     "@signalk/server-api": "^2.24.0",
     "@types/express": "^5.0.0",
@@ -80,7 +80,7 @@
     "supertest": "^7.2.2",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.0.0",
-    "vite": "^8.0.11",
+    "vite": "~8.0.13",
     "vitest": "^4.1.5"
   },
   "repository": {
