@@ -19,6 +19,7 @@ import { registerStagingRoutes } from './database-export/staging-routes.js'
 import { registerHostRestoreRoutes } from './restore-host-write.js'
 import { startSignalKEmitter, stopSignalKEmitter } from './signalk-deltas.js'
 import { resolveSignalkBaseUrl as resolveBaseUrl } from './signalk-base-url.js'
+import { errMsg } from './errors.js'
 
 const BACKUP_IMAGE = 'ghcr.io/dirkwa/signalk-backup-server'
 const CONTAINER_NAME = 'signalk-backup-server'
@@ -27,6 +28,14 @@ const SK_MOUNT = '/signalk-data'
 const API_PORT = 3010
 const OAUTH_PORT = 53682
 const SAFE_TAG = /^[a-zA-Z0-9._-]+$/
+
+// Readiness-retry backoff (15s doubling to a 2min ceiling, forever): a transient boot race must not wedge the plugin until a human restarts it — on a boat that can be weeks later.
+const READY_RETRY_MIN_MS = 15_000
+const READY_RETRY_MAX_MS = 120_000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 /**
  * Sensible default resource limits for the backup-server container.
@@ -78,10 +87,6 @@ async function waitForContainerManager(
   return getContainerManager()
 }
 
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
 /**
  * Resolve the actual host:port the backup-server container is reachable at.
  *
@@ -109,7 +114,7 @@ async function resolveActualAddress(
     const apiAnswer = await containers.resolveContainerAddress(CONTAINER_NAME, API_PORT)
     if (apiAnswer) return apiAnswer
   } catch (err) {
-    debug?.(`resolveContainerAddress threw: ${err instanceof Error ? err.message : String(err)}`)
+    debug?.(`resolveContainerAddress threw: ${errMsg(err)}`)
   }
 
   // Fallback: parse listContainers() ports for the legacy bare-metal-SK
@@ -134,7 +139,7 @@ async function resolveActualAddress(
       }
     }
   } catch (err) {
-    debug?.(`listContainers fallback threw: ${err instanceof Error ? err.message : String(err)}`)
+    debug?.(`listContainers fallback threw: ${errMsg(err)}`)
   }
   return null
 }
@@ -147,6 +152,9 @@ export default function (app: BackupServerAPI): Plugin {
   // In-flight tick handle so concurrent callers (scheduler + manual
   // backup) coalesce onto the same export rather than racing.
   let dbExportInFlight: Promise<void> | null = null
+  // Bumped on every start()/stop() so async work from an older lifecycle can detect it's stale and bail.
+  let runGeneration = 0
+  let updatesRegistered = false
 
   const buildContainerConfig = (tag: string): ContainerConfig => ({
     image: BACKUP_IMAGE,
@@ -227,13 +235,16 @@ export default function (app: BackupServerAPI): Plugin {
         }
       }
       currentSettings = merged
-      void asyncStart(merged).catch((err: unknown) => {
+      const gen = ++runGeneration
+      void asyncStart(merged, gen).catch((err: unknown) => {
         app.setPluginError(`Startup failed: ${errMsg(err)}`)
       })
     },
 
     async stop() {
       app.debug('Stopping signalk-backup')
+      // Invalidate any pending startup/readiness-retry work.
+      runGeneration++
       stopSignalKEmitter()
       stopDbExportTimer()
       shutdownSmbDiscovery()
@@ -247,6 +258,7 @@ export default function (app: BackupServerAPI): Plugin {
         } catch (err) {
           app.debug(`Error unregistering update tracker: ${errMsg(err)}`)
         }
+        updatesRegistered = false
         try {
           await containers.stop(CONTAINER_NAME)
         } catch (err) {
@@ -559,7 +571,7 @@ export default function (app: BackupServerAPI): Plugin {
     }
   }
 
-  async function asyncStart(settings: Config): Promise<void> {
+  async function asyncStart(settings: Config, gen: number): Promise<void> {
     if (!settings.managedContainer) {
       // External-server mode: skip the container, point at user-provided URL.
       const url = settings.externalUrl.trim()
@@ -569,26 +581,19 @@ export default function (app: BackupServerAPI): Plugin {
         )
         return
       }
-      client = new BackupClient(url)
+      const external = new BackupClient(url)
+      client = external
       // Keep the scheme so the proxy can route HTTPS external upstreams.
       containerAddress = url
       try {
-        await client.waitForReady(15_000)
-        app.setPluginStatus(`Connected to external backup-server at ${url}`)
-        await seedFirstRunSchedule(client)
-        startSignalKEmitter(app, url, { emitSignalKDeltas: settings.emitSignalKDeltas })
-        if (
-          settings.databaseExport.questdb ||
-          settings.databaseExport.grafana ||
-          settings.databaseExport.signalkDatabase
-        ) {
-          app.setPluginStatus(
-            `Connected to external backup-server. Note: database export ` +
-              `requires managed-container mode and was skipped.`
-          )
-        }
+        await external.waitForReady(15_000)
+        await finishExternal(gen, settings, external, url)
       } catch (err) {
         app.setPluginError(`External backup-server unreachable: ${errMsg(err)}`)
+        void retryUntilReady(gen, `External backup-server at ${url} unreachable`, async () => {
+          await external.waitForReady(10_000)
+          await finishExternal(gen, settings, external, url)
+        })
       }
       return
     }
@@ -649,20 +654,7 @@ export default function (app: BackupServerAPI): Plugin {
         })
       }
 
-      // Register with the central update service so users see "update available"
-      // badges in the signalk-container config panel without us writing custom
-      // GitHub-poll logic.
-      try {
-        containers.updates.register({
-          pluginId: PLUGIN_ID,
-          containerName: CONTAINER_NAME,
-          image: BACKUP_IMAGE,
-          currentTag: () => resolveImageTag(currentSettings?.imageTag ?? settings.imageTag),
-          versionSource: containers.updates.sources.githubReleases('dirkwa/signalk-backup-server')
-        })
-      } catch (err) {
-        app.debug(`updates.register failed (non-fatal): ${errMsg(err)}`)
-      }
+      registerUpdateTracker(containers, settings)
 
       const addr = await resolveActualAddress(containers, (m) => {
         app.debug(m)
@@ -681,15 +673,114 @@ export default function (app: BackupServerAPI): Plugin {
       const pending = new BackupClient(containerAddress)
       app.setPluginStatus('Waiting for backup-server to become ready...')
       await pending.waitForReady(60_000)
-      client = pending
-
-      await seedFirstRunSchedule(client)
-      startSignalKEmitter(app, containerAddress, {
-        emitSignalKDeltas: settings.emitSignalKDeltas
-      })
-      startDbExportTimer()
+      await finishStartup(gen, settings, pending, containerAddress)
     } catch (err) {
       app.setPluginError(`Container startup failed: ${errMsg(err)}`)
+      void retryUntilReady(gen, 'Container startup failed', () =>
+        managedReadyAttempt(gen, settings, containers, resolvedTag)
+      )
+    }
+  }
+
+  // Generation-guarded so a stop()/restart during a slow health probe can't resurrect stale timers or emitters.
+  async function finishStartup(
+    gen: number,
+    settings: Config,
+    pending: BackupClient,
+    address: string
+  ): Promise<void> {
+    if (gen !== runGeneration) return
+    client = pending
+    await seedFirstRunSchedule(pending)
+    if (gen !== runGeneration) return
+    startSignalKEmitter(app, address, {
+      emitSignalKDeltas: settings.emitSignalKDeltas
+    })
+    startDbExportTimer()
+  }
+
+  async function finishExternal(
+    gen: number,
+    settings: Config,
+    c: BackupClient,
+    url: string
+  ): Promise<void> {
+    if (gen !== runGeneration) return
+    app.setPluginStatus(`Connected to external backup-server at ${url}`)
+    await seedFirstRunSchedule(c)
+    if (gen !== runGeneration) return
+    startSignalKEmitter(app, url, { emitSignalKDeltas: settings.emitSignalKDeltas })
+    if (
+      settings.databaseExport.questdb ||
+      settings.databaseExport.grafana ||
+      settings.databaseExport.signalkDatabase
+    ) {
+      app.setPluginStatus(
+        `Connected to external backup-server. Note: database export ` +
+          `requires managed-container mode and was skipped.`
+      )
+    }
+  }
+
+  // One retry-loop attempt: ensureRunning is idempotent, the drift/recreate check already ran on the first attempt, and the address is re-resolved because a container that only now came up may bind a different host port.
+  async function managedReadyAttempt(
+    gen: number,
+    settings: Config,
+    containers: ContainerManagerApi,
+    resolvedTag: string
+  ): Promise<void> {
+    await containers.ensureRunning(CONTAINER_NAME, buildContainerConfig(resolvedTag), {
+      onVolumeIssue
+    })
+    registerUpdateTracker(containers, settings)
+    const addr = await resolveActualAddress(containers, (m) => {
+      app.debug(m)
+    })
+    if (!addr) {
+      throw new Error('Could not resolve container address')
+    }
+    containerAddress = `http://${addr}`
+    const pending = new BackupClient(containerAddress)
+    await pending.waitForReady(10_000)
+    await finishStartup(gen, settings, pending, containerAddress)
+  }
+
+  // Runs until an attempt succeeds or the generation moves on; keeps the latest failure cause in the plugin status so the admin UI stays truthful while retrying.
+  async function retryUntilReady(
+    gen: number,
+    label: string,
+    attempt: () => Promise<void>
+  ): Promise<void> {
+    let delay = READY_RETRY_MIN_MS
+    for (let attemptNo = 1; ; attemptNo++) {
+      await sleep(delay)
+      if (gen !== runGeneration) return
+      try {
+        await attempt()
+        return
+      } catch (err) {
+        if (gen !== runGeneration) return
+        delay = Math.min(delay * 2, READY_RETRY_MAX_MS)
+        app.debug(`readiness retry ${attemptNo} failed: ${errMsg(err)}`)
+        app.setPluginError(`${label}: ${errMsg(err)} — retrying in ${Math.round(delay / 1000)}s`)
+      }
+    }
+  }
+
+  // "Update available" badges via signalk-container's central update service; guarded so readiness retries don't register duplicate trackers.
+  function registerUpdateTracker(containers: ContainerManagerApi, settings: Config): void {
+    if (updatesRegistered) return
+    try {
+      containers.updates.register({
+        pluginId: PLUGIN_ID,
+        containerName: CONTAINER_NAME,
+        image: BACKUP_IMAGE,
+        currentTag: () => resolveImageTag(currentSettings?.imageTag ?? settings.imageTag),
+        versionSource: containers.updates.sources.githubReleases('dirkwa/signalk-backup-server')
+      })
+      updatesRegistered = true
+    } catch (err) {
+      app.debug(`updates.register failed (non-fatal): ${errMsg(err)}`)
     }
   }
 

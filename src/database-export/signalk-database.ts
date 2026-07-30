@@ -6,6 +6,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { join } from 'node:path'
 import type { DatabaseExporter, ExportResult, TableExport } from './types.js'
+import { errMsg } from '../errors.js'
 
 const SIGNALK_DATABASE_PLUGIN_ID = 'signalk-database'
 const DEFAULT_SIGNALK_BASE = 'http://127.0.0.1:3000'
@@ -167,8 +168,4 @@ async function atomicWrite(body: ReadableStream<Uint8Array>, finalPath: string):
     await unlink(partialPath).catch(() => undefined)
     throw err
   }
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }

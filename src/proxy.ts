@@ -7,6 +7,7 @@
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { IRouter, Request as ExpressRequest, Response as ExpressResponse } from 'express'
+import { errMsg } from './errors.js'
 
 // Hop-by-hop headers per RFC 7230 §6.1 (must NOT cross a proxy hop), plus
 // host (gets rewritten to upstream) and content-length (recomputed by
@@ -124,8 +125,4 @@ export function registerProxy(router: IRouter, opts: ProxyOptions): void {
       }
     }
   })
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }

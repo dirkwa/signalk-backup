@@ -24,6 +24,7 @@ import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import { join } from 'node:path'
 import type { DatabaseExporter, ExportResult, TableExport } from './types.js'
+import { errMsg } from '../errors.js'
 import {
   weekStartUtc,
   weekEndUtc,
@@ -299,8 +300,4 @@ export class QuestDBExporter implements DatabaseExporter {
     }
     return { bytes }
   }
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }

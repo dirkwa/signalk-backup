@@ -5,6 +5,7 @@ import { createReadStream } from 'node:fs'
 import { lstat, readdir, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { IRouter, Request, Response } from 'express'
+import { errMsg } from '../errors.js'
 
 export interface StagingEntry {
   path: string
@@ -223,8 +224,4 @@ async function resolveExistingAncestor(target: string): Promise<string> {
 
 function isENOENT(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === 'ENOENT'
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }

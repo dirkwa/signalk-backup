@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import type { DatabaseExporter, ExportResult, TableExport } from './types.js'
+import { errMsg } from '../errors.js'
 
 const GRAFANA_PLUGIN_ID = 'signalk-grafana'
 const DEFAULT_SIGNALK_BASE = 'http://127.0.0.1:3000'
@@ -295,8 +296,4 @@ async function atomicWrite(body: ReadableStream<Uint8Array>, finalPath: string):
     await unlink(partialPath).catch(() => undefined)
     throw err
   }
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }
