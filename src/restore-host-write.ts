@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import type { IRouter, Request, Response } from 'express'
 import unzipper from 'unzipper'
+import { errMsg } from './errors.js'
 
 export interface RestoreHostWriteOptions {
   // Returns null while the upstream container is starting; the route 503s in that window.
@@ -435,8 +436,4 @@ async function extractZipSafely(input: Readable, targetDir: string): Promise<voi
       }
     }
   })
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }

@@ -23,6 +23,7 @@ export default defineConfig({
         './AppPanel': resolve(here, 'webapp/src/AppPanel.tsx')
       },
       shared: {
+        // @module-federation/vite is pinned to ~1.15.5 and vite to ~8.0.13 (see dependabot.yml): MF-vite >=1.18 auto-shares react-dom/client with inherited import: false, which the admin UI host never provides, and vite 8.1/rolldown 1.1 make even 1.15.x register that sub-path with a throwing getter — diff the built localSharedImportMap against the published package and re-test the embedded panel on a real server before unpinning either.
         // import: false prevents bundling a second React copy that breaks useState; see signalk-updater/vite.config.ts.
         react: { singleton: true, requiredVersion: '^19.0.0', import: false },
         'react-dom': { singleton: true, requiredVersion: '^19.0.0', import: false },

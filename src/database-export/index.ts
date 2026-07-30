@@ -15,6 +15,7 @@ import { GrafanaExporter } from './grafana.js'
 import { QuestDBExporter } from './questdb.js'
 import { SignalKDatabaseExporter } from './signalk-database.js'
 import type { DatabaseExporter, ExportResult } from './types.js'
+import { errMsg } from '../errors.js'
 
 const PLUGIN_ID = 'signalk-backup'
 const STAGING_SUBDIR = 'database-exports'
@@ -81,10 +82,7 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
     try {
       detected = await exporter.detect()
     } catch (err) {
-      opts.warn?.(
-        `[db-export] ${exporter.pluginId} detection failed: ` +
-          (err instanceof Error ? err.message : String(err))
-      )
+      opts.warn?.(`[db-export] ${exporter.pluginId} detection failed: ${errMsg(err)}`)
       continue
     }
     if (!detected) {
@@ -105,9 +103,7 @@ export async function runAllExports(opts: ExportOrchestratorOptions): Promise<Ex
           `${r.totalBytes} bytes, ${r.durationMs}ms`
       )
     } catch (err) {
-      opts.log?.(
-        `[db-export] ${exporter.pluginId} failed: ${err instanceof Error ? err.message : String(err)}`
-      )
+      opts.log?.(`[db-export] ${exporter.pluginId} failed: ${errMsg(err)}`)
     }
   }
   return results

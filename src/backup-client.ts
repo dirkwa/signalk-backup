@@ -71,6 +71,12 @@ export class BackupClient {
         return wrapped.data as T
       }
       return raw as T
+    } catch (err) {
+      // Native abort errors name neither the endpoint nor the timeout that fired.
+      if (controller.signal.aborted) {
+        throw new Error(`backup-server ${path} timed out after ${timeoutMs}ms`, { cause: err })
+      }
+      throw err
     } finally {
       clearTimeout(timer)
     }
@@ -88,11 +94,9 @@ export class BackupClient {
         await new Promise((r) => setTimeout(r, intervalMs))
       }
     }
-    throw new Error(
-      `backup-server did not become ready within ${maxMs}ms: ${
-        lastErr instanceof Error ? lastErr.message : String(lastErr)
-      }`
-    )
+    throw new Error(`backup-server at ${this.baseUrl} did not become ready within ${maxMs}ms`, {
+      cause: lastErr
+    })
   }
 
   async getSettings(): Promise<BackupServerSettings> {
