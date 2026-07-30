@@ -34,7 +34,10 @@ const READY_RETRY_MIN_MS = 15_000
 const READY_RETRY_MAX_MS = 120_000
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  return new Promise((resolve) => {
+    // unref: a pending background retry must not keep a shutting-down process alive.
+    setTimeout(resolve, ms).unref()
+  })
 }
 
 /**
@@ -589,7 +592,10 @@ export default function (app: BackupServerAPI): Plugin {
         await external.waitForReady(15_000)
         await finishExternal(gen, settings, external, url)
       } catch (err) {
-        app.setPluginError(`External backup-server unreachable: ${errMsg(err)}`)
+        if (gen !== runGeneration) return
+        app.setPluginError(
+          `External backup-server unreachable: ${errMsg(err)} — retrying in ${READY_RETRY_MIN_MS / 1000}s`
+        )
         void retryUntilReady(gen, `External backup-server at ${url} unreachable`, async () => {
           await external.waitForReady(10_000)
           await finishExternal(gen, settings, external, url)
@@ -675,7 +681,10 @@ export default function (app: BackupServerAPI): Plugin {
       await pending.waitForReady(60_000)
       await finishStartup(gen, settings, pending, containerAddress)
     } catch (err) {
-      app.setPluginError(`Container startup failed: ${errMsg(err)}`)
+      if (gen !== runGeneration) return
+      app.setPluginError(
+        `Container startup failed: ${errMsg(err)} — retrying in ${READY_RETRY_MIN_MS / 1000}s`
+      )
       void retryUntilReady(gen, 'Container startup failed', () =>
         managedReadyAttempt(gen, settings, containers, resolvedTag)
       )
@@ -729,6 +738,8 @@ export default function (app: BackupServerAPI): Plugin {
     containers: ContainerManagerApi,
     resolvedTag: string
   ): Promise<void> {
+    // Bail before touching podman — stop() may have already stopped the container.
+    if (gen !== runGeneration) return
     await containers.ensureRunning(CONTAINER_NAME, buildContainerConfig(resolvedTag), {
       onVolumeIssue
     })
@@ -739,6 +750,8 @@ export default function (app: BackupServerAPI): Plugin {
     if (!addr) {
       throw new Error('Could not resolve container address')
     }
+    // Re-check before publishing: stop() nulls containerAddress and the proxy reads it live — a stale attempt must not resurrect it.
+    if (gen !== runGeneration) return
     containerAddress = `http://${addr}`
     const pending = new BackupClient(containerAddress)
     await pending.waitForReady(10_000)
