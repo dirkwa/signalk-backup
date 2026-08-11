@@ -477,7 +477,8 @@ export default function (app: BackupServerAPI): Plugin {
       await retryForever(
         async () => {
           if (gen !== lifecycleGeneration) return
-          await external.waitForReady(15_000)
+          // retryForever only checks between attempts, so the signal must reach the probe itself.
+          await external.waitForReady(15_000, 1000, signal)
           await finishExternal(gen, settings, external, url)
         },
         {

@@ -36,18 +36,37 @@ export interface BackupServerHealth {
   version?: string
 }
 
+// Resolves early when `signal` fires, so a cancelled poll skips its remaining wait.
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(finish, ms)
+    function finish() {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', finish)
+      resolve()
+    }
+    signal?.addEventListener('abort', finish, { once: true })
+  })
+}
+
 export class BackupClient {
   constructor(private readonly baseUrl: string) {}
 
   private async request<T>(
     path: string,
-    init: RequestInit & { timeoutMs?: number } = {}
+    init: RequestInit & { timeoutMs?: number; signal?: AbortSignal } = {}
   ): Promise<T> {
     const controller = new AbortController()
     const timeoutMs = init.timeoutMs ?? 10_000
     const timer = setTimeout(() => {
       controller.abort()
     }, timeoutMs)
+    // Abort the live fetch too: a caller that gave up should not wait out the request timeout.
+    const onCallerAbort = () => {
+      controller.abort()
+    }
+    init.signal?.addEventListener('abort', onCallerAbort, { once: true })
+    if (init.signal?.aborted) controller.abort()
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -79,19 +98,23 @@ export class BackupClient {
       throw err
     } finally {
       clearTimeout(timer)
+      init.signal?.removeEventListener('abort', onCallerAbort)
     }
   }
 
-  async waitForReady(maxMs = 30_000, intervalMs = 1000): Promise<void> {
+  // Without `signal` this keeps probing for its full budget after the caller gave up: the retry loop around it only checks between attempts.
+  async waitForReady(maxMs = 30_000, intervalMs = 1000, signal?: AbortSignal): Promise<void> {
     const deadline = Date.now() + maxMs
     let lastErr: unknown
     while (Date.now() < deadline) {
+      if (signal?.aborted) throw new Error('waitForReady aborted', { cause: lastErr })
       try {
-        await this.request<BackupServerHealth>('/api/health', { timeoutMs: 2000 })
+        await this.request<BackupServerHealth>('/api/health', { timeoutMs: 2000, signal })
         return
       } catch (err) {
         lastErr = err
-        await new Promise((r) => setTimeout(r, intervalMs))
+        if (signal?.aborted) throw new Error('waitForReady aborted', { cause: err })
+        await sleep(intervalMs, signal)
       }
     }
     throw new Error(`backup-server at ${this.baseUrl} did not become ready within ${maxMs}ms`, {
