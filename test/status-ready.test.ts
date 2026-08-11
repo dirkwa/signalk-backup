@@ -208,3 +208,79 @@ describe('/status ready reflects the live container', () => {
     await plugin.stop()
   })
 })
+
+describe('/status ready in external mode', () => {
+  async function startExternal(externalUrl: string) {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'sk-backup-ext-'))
+    tempDirs.push(dataDir)
+    const app = makeApp(dataDir)
+    const plugin: Plugin = createPlugin(app as unknown as BackupServerAPI)
+    const routes: { status?: StatusHandler } = {}
+    plugin.registerWithRouter?.(routerCapturing(routes) as never)
+    const status = routes.status
+    if (!status) throw new Error('plugin did not register GET /status')
+    plugin.start(
+      { managedContainer: false, externalUrl, emitSignalKDeltas: false },
+      () => undefined
+    )
+    return { plugin, app, status }
+  }
+
+  it('does not report ready before the upstream has answered', async () => {
+    // Accepts connections but never responds, so readiness can never succeed.
+    const base = await listen(() => undefined)
+    const { plugin, status } = await startExternal(base)
+
+    // `client` used to be assigned eagerly, so ready flipped true with nothing answered.
+    let sawReady = false
+    await until(async () => {
+      if ((await readStatus(status))['ready'] === true) sawReady = true
+      return sawReady
+    }, 2500)
+
+    expect(sawReady).toBe(false)
+    await plugin.stop()
+  })
+
+  it('reports ready once the external server answers', async () => {
+    const base = await healthyBackupServer()
+    const { plugin, status } = await startExternal(base)
+
+    expect(await until(async () => (await readStatus(status))['ready'] === true, 8000)).toBe(true)
+    await plugin.stop()
+  })
+})
+
+describe('/status ready after a reconfigure', () => {
+  it('drops ready when start() is called again for a different upstream', async () => {
+    const healthy = await healthyBackupServer()
+    // Accepts connections but never answers, so readiness can never succeed.
+    const dead = await listen(() => undefined)
+
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'sk-backup-reconf-'))
+    tempDirs.push(dataDir)
+    const app = makeApp(dataDir)
+    const plugin: Plugin = createPlugin(app as unknown as BackupServerAPI)
+    const routes: { status?: StatusHandler } = {}
+    plugin.registerWithRouter?.(routerCapturing(routes) as never)
+    const status = routes.status
+    if (!status) throw new Error('plugin did not register GET /status')
+
+    plugin.start(
+      { managedContainer: false, externalUrl: healthy, emitSignalKDeltas: false },
+      () => undefined
+    )
+    expect(await until(async () => (await readStatus(status))['ready'] === true, 8000)).toBe(true)
+
+    // SignalK re-runs start() on a config save, with no stop() in between.
+    plugin.start(
+      { managedContainer: false, externalUrl: dead, emitSignalKDeltas: false },
+      () => undefined
+    )
+    await new Promise((r) => setTimeout(r, 400))
+
+    // Previously the old upstream's client survived, so this stayed true.
+    expect((await readStatus(status))['ready']).toBe(false)
+    await plugin.stop()
+  })
+})
