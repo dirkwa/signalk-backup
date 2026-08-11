@@ -203,6 +203,9 @@ export default function (app: BackupServerAPI): Plugin {
       startAbort?.abort()
       const abort = new AbortController()
       startAbort = abort
+      // SignalK re-runs start() on a config save with no stop(), so keeping these reported the previous upstream's readiness while connecting to a new one.
+      client = null
+      containerAddress = null
       // startSafely: SignalK does not await start(), and it demotes the
       // helper's `cancelled` error to debug so stopping mid-startup doesn't
       // leave "Startup failed: Operation cancelled" in the plugin error box.
@@ -254,7 +257,7 @@ export default function (app: BackupServerAPI): Plugin {
             image: containerImage,
             managed
           },
-          // Managed mode ANDs in the live state: `client` is cleared only in stop(), so on its own it kept reporting ready for a container that had gone away (#103).
+          // `client` is published only once the upstream has answered, in both modes. Managed mode also ANDs in the live state, since `client` is cleared only in stop() and so kept reporting ready for a container that had gone away (#103).
           ready: client !== null && (!managed || state === 'running'),
           ...(pathMapping ? { pathMapping } : {})
         })
@@ -470,8 +473,7 @@ export default function (app: BackupServerAPI): Plugin {
         return
       }
       const external = new BackupClient(url)
-      client = external
-      // Keep the scheme so the proxy can route HTTPS external upstreams.
+      // Only the address is published here, scheme included so the proxy can route HTTPS upstreams; `client` waits for finishExternal, or /status would report ready before the upstream had answered.
       containerAddress = url
       // No container here, so the helper's ManagedContainer has nothing to do —
       // but the retry policy is the same, so reuse its primitive directly.
@@ -535,6 +537,8 @@ export default function (app: BackupServerAPI): Plugin {
     url: string
   ): Promise<void> {
     if (gen !== lifecycleGeneration) return
+    // Deferred to here so ready cannot be true before the upstream answered.
+    client = c
     app.setPluginStatus(`Connected to external backup-server at ${url}`)
     await seedFirstRunSchedule(c)
     if (gen !== lifecycleGeneration) return
