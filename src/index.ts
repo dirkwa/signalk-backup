@@ -254,7 +254,8 @@ export default function (app: BackupServerAPI): Plugin {
             image: containerImage,
             managed
           },
-          ready: client !== null,
+          // Managed mode ANDs in the live state: `client` is cleared only in stop(), so on its own it kept reporting ready for a container that had gone away (#103).
+          ready: client !== null && (!managed || state === 'running'),
           ...(pathMapping ? { pathMapping } : {})
         })
       })
@@ -505,9 +506,7 @@ export default function (app: BackupServerAPI): Plugin {
     // Full URL keeps the format consistent with external mode (which may be
     // HTTPS) so the proxy can use the value as-is.
     containerAddress = address
-    // `client` stays null until /api/health succeeds, so /status's
-    // `ready: client !== null` reports the truthful upstream-reachable
-    // signal rather than just "we know the address."
+    // Managed mode assigns `client` only after /api/health answers, so /status reports having reached the upstream rather than just knowing its address.
     const pending = new BackupClient(address)
     await finishStartup(gen, settings, pending, address)
   }
