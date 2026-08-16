@@ -16,19 +16,12 @@ updates:
       # Allow updates within the v22.x line; ignore v23+.
       - dependency-name: "@types/node"
         versions: [">=23"]
-      # From 1.18 the plugin auto-shares react-dom/client with import: false,
-      # which breaks embedded loading on SignalK admin UIs that only provide
-      # react and react-dom (see vite.config.ts). Stay on the tested 1.15.x
-      # line until the admin UI provides the sub-path or the plugin allows
-      # opting out.
-      - dependency-name: "@module-federation/vite"
-        versions: [">=1.16.0"]
-      # vite 8.1.x (rolldown 1.1.x) makes @module-federation/vite 1.15.x
-      # additionally register react-dom/client in usedShared with a throwing
-      # import: false getter. Hold the 8.0.x line so the built share map stays
-      # identical to the known-good 0.9.3 output (see vite.config.ts).
-      - dependency-name: "vite"
-        versions: [">=8.1.0"]
+      # @module-federation/vite and vite are deliberately NOT pinned here any
+      # more: scripts/check-federation-shares.mjs fails `npm run build` (and
+      # so CI and publish) if a bump makes the remote's share map drift from
+      # what the Signal K admin UI provides, and `npm run test:e2e` loads the
+      # panel in a real admin UI. That is the check a version pin was
+      # standing in for (#94, #108).
 
   - package-ecosystem: github-actions
     directory: "/"

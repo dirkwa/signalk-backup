@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/signalk-backup/icon.svg" />
+    <title>SignalK Backup</title>
+    <!--
+      This webapp is a Signal K embeddable webapp: it only runs inside the
+      admin UI, which supplies the React it shares. Send anyone landing on the
+      bare /signalk-backup/ URL to the embedded view. Belt and braces: the
+      meta refresh covers browsers with scripting disabled.
+    -->
+    <meta http-equiv="refresh" content="0; url=/admin/#/e/signalk_backup" />
+    <script>
+      window.location.replace('/admin/#/e/signalk_backup')
+    </script>
+  </head>
+  <body>
+    <p>
+      Redirecting to the
+      <a href="/admin/#/e/signalk_backup">SignalK Backup webapp in the admin UI</a>…
+    </p>
+  </body>
+</html>

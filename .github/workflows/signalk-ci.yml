@@ -97,3 +97,29 @@ jobs:
       enable-armv7: ${{ inputs.enable-armv7 }}
       enable-signalk-integration: ${{ inputs.enable-signalk-integration }}
       signalk-server-versions: ${{ inputs.signalk-server-versions }}
+
+  # ── End-to-end: built panel inside a real Signal K admin UI ──
+  # The federation contract with the admin UI host is invisible to unit
+  # tests (#94, #108 both shipped green). test/e2e installs signalk-server
+  # on demand and drives the admin UI with headless Chromium.
+  e2e:
+    if: ${{ github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run test:e2e
