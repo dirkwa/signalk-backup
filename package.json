@@ -1,6 +1,6 @@
 {
   "name": "signalk-backup",
-  "version": "0.10.1",
+  "version": "1.0.0",
   "description": "Scheduled deduplicated backups of SignalK config to local storage and Google Drive (via Kopia + rclone)",
   "main": "plugin/index.js",
   "type": "module",
@@ -43,6 +43,9 @@
   },
   "files": [
     "plugin/**/*",
+    "LICENSE.md",
+    "LICENSE-Apache-2.0-through-v0.x.txt",
+    "CONTRIBUTING.md",
     "public/**/*",
     "assets/**/*",
     "docs/**/*"
@@ -88,5 +91,5 @@
     "type": "git",
     "url": "git+https://github.com/dirkwa/signalk-backup.git"
   },
-  "license": "Apache-2.0"
+  "license": "SEE LICENSE IN LICENSE.md"
 }
