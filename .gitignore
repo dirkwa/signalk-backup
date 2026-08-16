@@ -16,3 +16,6 @@ plugin/**/*.d.ts.map
 
 # Local CodeRabbit review artifacts (saved per workflow rule).
 cr-review*.txt
+
+# End-to-end harness cache (throwaway signalk-server install; see test/e2e/).
+.e2e-cache/

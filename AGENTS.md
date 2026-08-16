@@ -13,7 +13,7 @@ Two operating modes:
 
 ## Architecture rules
 
-- **Webapp is an embedded panel, not a standalone shell.** Keyword `signalk-embeddable-webapp`. Built as a Vite Module Federation remote exposing `./AppPanel` so the admin renders us inside its own layout with the sidebar still visible. React must be shared as a singleton with the admin (`import: false` on `react`/`react-dom`) — without it, two React instances coexist and hooks return null at first paint. `react/jsx-runtime` and `react/jsx-dev-runtime` must NOT use the same deferred-host pattern: the admin doesn't pre-register them in its share scope, so they're shared with a bundled fallback. See `vite.config.ts` for the exact share map.
+- **Webapp is an embedded panel, not a standalone shell.** Keyword `signalk-embeddable-webapp`. Built as a Vite Module Federation remote exposing `./AppPanel` so the admin renders us inside its own layout with the sidebar still visible. React must be shared as a singleton with the admin (`import: false` on `react`/`react-dom`) — without it, two React instances coexist and hooks return null at first paint. `react/jsx-runtime` and `react/jsx-dev-runtime` must NOT use the same deferred-host pattern: the admin doesn't pre-register them in its share scope, so they're shared with a bundled fallback. See `vite.config.ts` for the exact share map. Two things keep that map honest, because the admin only provides `react` and `react-dom` and anything else the remote declares as host-provided kills the panel at load ("Shared module '…' must be provided by host", #94/#108): `scripts/check-federation-shares.mjs` fails `npm run build` if the emitted share map drifts, and `npm run test:e2e` mounts the built panel in a real signalk-server admin UI. Nothing in the federated build graph may import a sub-path of a shared package (e.g. `react-dom/client`) — @module-federation/vite registers such sub-paths as shared, inheriting `import: false`; that is why the dev shell is not the build input.
 - **The panel must not write to `window.location.hash`.** The admin owns the hash for its own routing. Tab state in `webapp/src/App.tsx` is in-memory only.
 
 ## Companion plugins (hard runtime dependencies)
@@ -52,17 +52,18 @@ Listed in `package.json` under `signalk.requires`:
 - [src/config/schema.ts](src/config/schema.ts) — typebox schema → Signal K admin UI form. Adding a config field starts here; **also** add it to `SCHEMA_DEFAULTS` (see Gotchas).
 - [src/config/image-tag.ts](src/config/image-tag.ts) — `imageTag: "auto"` resolves to the hand-bumped `BACKUP_SERVER_VERSION` constant. Plugin and server versions are decoupled — bumping that constant is a deliberate act in its own PR.
 - [src/types.ts](src/types.ts) — re-exports signalk-container's API types from `signalk-container-helper`, plus the local `BackupServerAPI` alias. The helper's copy is pinned against the real thing by a build-time contract test, which a local mirror is not. Loose coupling is unchanged: this plugin never imports signalk-container itself, only its types, and reaches the API at runtime via `globalThis`.
-- [webapp/](webapp/) — React 19 + Vite + reactstrap. Module Federation remote (see [webapp/src/AppPanel.tsx](webapp/src/AppPanel.tsx)) embedded in the SignalK admin shell — see Architecture rules above. Tabs: Dashboard, Backups, Database exports, Cloud sync, Settings. All HTTP via `/plugins/signalk-backup/api/*` (same SignalK origin). `webapp/src/api.ts` is the typed client; `webapp/src/components/` holds the shared widgets (`BackupBrowser`, `PartialRestoreModal`, `PartialRestoreBanner`); each top-level tab is a file under `webapp/src/views/`. `webapp/index.html` and `webapp/src/main.tsx` are kept for standalone `npm run dev` only.
-- [test/](test/) — vitest. Pure unit tests: schema validation, exporter behaviour against a mocked `fetch`, staging-route path-safety against a temp dir + supertest, host-restore path resolution and ZIP-entry safety. There is no integration harness for the React webapp; manual verification is via the live SignalK server (see "Local dev loop").
+- [webapp/](webapp/) — React 19 + Vite + reactstrap. Module Federation remote (see [webapp/src/AppPanel.tsx](webapp/src/AppPanel.tsx)) embedded in the SignalK admin shell — see Architecture rules above. Tabs: Dashboard, Backups, Database exports, Cloud sync, Settings. All HTTP via `/plugins/signalk-backup/api/*` (same SignalK origin). `webapp/src/api.ts` is the typed client; `webapp/src/components/` holds the shared widgets (`BackupBrowser`, `PartialRestoreModal`, `PartialRestoreBanner`); each top-level tab is a file under `webapp/src/views/`. `webapp/dev.html` and `webapp/src/main.tsx` are the `npm run dev` shell only (plain Vite, no federation, React from node_modules); they are not part of the built remote. `webapp/public/index.html` is a static redirect to the embedded view, so `/signalk-backup/` never serves the remote outside a host.
+- [test/](test/) — vitest. Pure unit tests: schema validation, exporter behaviour against a mocked `fetch`, staging-route path-safety against a temp dir + supertest, host-restore path resolution and ZIP-entry safety. [test/e2e/](test/e2e/) is the end-to-end harness (`npm run test:e2e`, after `npm run build`): it installs `signalk-server` on demand into `.e2e-cache/`, starts it on a free port with this checkout symlinked in as the plugin, and drives the admin UI with headless Chromium (playwright) to assert the federated panel mounts, switches tabs and logs no federation errors. It is not part of `npm test`; CI runs it as its own job.
 
 ## Build, lint, test
 
 ```bash
 npm run format     # prettier + eslint --fix
 npm run lint       # eslint check (no auto-fix)
-npm run build      # tsc → plugin/, then build.js (redirect HTML), then webpack (config panel)
+npm run build      # tsc → plugin/, typecheck webapp, vite → public/ (+ share-map guard)
 npm run build:all  # lint + build + test
-npm test           # vitest
+npm test           # vitest (unit)
+npm run test:e2e   # real signalk-server + headless Chromium against public/ (needs `npx playwright install chromium` once)
 ```
 
 The `plugin/` and `public/` directories are gitignored build output. `prepublishOnly` rebuilds before npm publish.
@@ -75,7 +76,7 @@ The plugin runs inside whichever Signal K server has `signalk-backup` in its `no
 2. Restart the SignalK process. Toggling the plugin from the admin UI does **not** re-`require()` the module — Node's `require.cache` keeps the old code (this caught us during v0.2 development).
 3. Hard-reload the admin UI in the browser (Ctrl-Shift-R) so the new webapp bundle loads, not the cached one. Without this you see stale UI even after a successful plugin reload.
 4. `curl http://127.0.0.1:<sk-port>/plugins/signalk-backup/status | jq .` to confirm the new code is live — `pathMapping` should be present in managed-container mode.
-5. Webapp at `http://<sk-host>/signalk-backup/`. API surface at `/plugins/signalk-backup/api/*`.
+5. Webapp at `http://<sk-host>/admin/#/e/signalk_backup` (`/signalk-backup/` redirects there). API surface at `/plugins/signalk-backup/api/*`.
 
 To exercise the database-export path against live data without waiting for the timer, you can call `runAllExports` from a Node REPL pointed at the built `plugin/database-export/index.js`.
 

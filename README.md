@@ -37,7 +37,7 @@ The plugin pulls `ghcr.io/dirkwa/signalk-backup-server` at a server version it p
 
 ```text
 Browser
-  └── /signalk-backup/                                  ← plugin webapp (React)
+  └── /admin/#/e/signalk_backup                         ← plugin webapp (React, embedded in the admin UI)
        └── /plugins/signalk-backup/api/*                ← plugin's reverse proxy
             ├── /api/db-export/staging                  ← plugin-local (file lister)
             ├── /api/restore-partial-host               ← plugin-local (writes to host fs)
@@ -49,7 +49,7 @@ Browser
 
 The plugin is most of the user experience:
 
-- The **webapp** at `/signalk-backup/` is a React SPA bundled by Vite. It runs in the SignalK admin origin and reads/writes via `fetch('/plugins/signalk-backup/api/*')`. No CORS dance, no separate auth — it inherits SignalK's.
+- The **webapp** is a React panel bundled by Vite and embedded in the SignalK admin UI at `/admin/#/e/signalk_backup` (the bare `/signalk-backup/` URL redirects there). It shares the admin's React, runs in the admin origin and reads/writes via `fetch('/plugins/signalk-backup/api/*')`. No CORS dance, no separate auth — it inherits SignalK's.
 - The **plugin process** owns three things directly: the database-export scheduler tick, an HTTP route that lists / streams files from the staging tree (so the webapp can show "live" exports), and an HTTP route that performs host-side file writes for custom-path restores.
 - Everything else — Kopia snapshots, restore-with-rollback, cloud sync, scheduling — runs in the [signalk-backup-server](https://github.com/dirkwa/signalk-backup-server) container. The plugin reverse-proxies `/api/*` through to it, and adds a small set of explicit overrides above the catch-all proxy.
 
