@@ -7,8 +7,10 @@ describe('config schema', () => {
     expect(Value.Check(ConfigSchema, SCHEMA_DEFAULTS)).toBe(true)
   })
 
-  it('default imageTag is "auto" so it tracks the plugin version', () => {
+  it('default imageTag is "auto" so it tracks the newest server release', () => {
     expect(SCHEMA_DEFAULTS.imageTag).toBe('auto')
+    // Empty until the first resolve; a stale value here would pin new installs.
+    expect(SCHEMA_DEFAULTS.resolvedImageTag).toBe('')
   })
 
   it('databaseExport is off-schema (webapp Settings tab owns the UI; runtime route enforces ranges)', () => {

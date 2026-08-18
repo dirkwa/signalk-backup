@@ -13,8 +13,17 @@ export const ConfigSchema = Type.Object({
     default: 'auto',
     title: 'Container image tag',
     description:
-      '"auto" (default) tracks the signalk-backup-server version this plugin release was tested against. ' +
+      '"auto" (default) resolves to the newest published signalk-backup-server release when the plugin ' +
+      'first starts, then stays on that version so restarts never swap the container underneath you. ' +
+      'Newer releases appear as an update in the container manager. ' +
       'Pin to a specific version (e.g. "0.4.0") or use a floating tag (e.g. "latest") to override.'
+  }),
+  resolvedImageTag: Type.String({
+    default: '',
+    title: 'Resolved image version (read-only)',
+    description:
+      'Managed by the plugin: the concrete version "auto" resolved to. Cleared to re-resolve on next ' +
+      'start. Ignored when imageTag is pinned to something other than "auto".'
   }),
   externalUrl: Type.String({
     default: '',
@@ -49,6 +58,7 @@ export type Config = Static<typeof ConfigSchema> & {
 export const SCHEMA_DEFAULTS: Config = {
   managedContainer: true,
   imageTag: 'auto',
+  resolvedImageTag: '',
   externalUrl: '',
   emitSignalKDeltas: true,
   databaseExport: {

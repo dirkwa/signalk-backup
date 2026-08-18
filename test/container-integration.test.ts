@@ -32,7 +32,7 @@ describe('SCHEMA_DEFAULTS merge', () => {
     const merged: Config = { ...SCHEMA_DEFAULTS, ...config }
     expect(merged.managedContainer).toBe(false)
     expect(merged.externalUrl).toBe('http://server:3001')
-    expect(merged.imageTag).toBe('auto') // unchanged from defaults (resolves to plugin version at runtime)
+    expect(merged.imageTag).toBe('auto')
   })
 
   it('SCHEMA_DEFAULTS is itself a valid Config (defends against renames)', () => {

@@ -6,7 +6,8 @@ import {
   ManagedContainer,
   getContainerManager,
   retryForever,
-  startSafely
+  startSafely,
+  waitForContainerManager
 } from 'signalk-container-helper'
 import { BackupClient } from './backup-client.js'
 import { registerProxy } from './proxy.js'
@@ -19,7 +20,8 @@ import {
   VolumeIssue
 } from './types.js'
 import { ConfigSchema, Config, SCHEMA_DEFAULTS } from './config/schema.js'
-import { resolveImageTag } from './config/image-tag.js'
+import { BACKUP_SERVER_REPO, BACKUP_SERVER_VERSION, resolveImageTag } from './config/image-tag.js'
+import { resolveAutoTag } from './config/resolve-auto-tag.js'
 import { runAllExports } from './database-export/index.js'
 import { registerStagingRoutes } from './database-export/staging-routes.js'
 import { registerHostRestoreRoutes } from './restore-host-write.js'
@@ -64,6 +66,8 @@ const DEFAULT_RESOURCES: ContainerResourceLimits = {
 export default function (app: BackupServerAPI): Plugin {
   let client: BackupClient | null = null
   let currentSettings: Config | null = null
+  // The helper's resolveTag hook is sync, so asyncStart resolves "auto" and parks it here.
+  let resolvedAutoTag: string | null = null
   let containerAddress: string | null = null
   let dbExportTimer: NodeJS.Timeout | null = null
   // In-flight tick handle so concurrent callers (scheduler + manual
@@ -164,8 +168,8 @@ export default function (app: BackupServerAPI): Plugin {
       }
     },
     updates: {
-      versionSource: { githubReleases: 'dirkwa/signalk-backup-server' },
-      currentTag: () => resolveImageTag(currentSettings?.imageTag ?? 'auto')
+      versionSource: { githubReleases: BACKUP_SERVER_REPO },
+      currentTag: () => resolveImageTag(currentSettings?.imageTag ?? 'auto', resolvedAutoTag)
     },
     ensureOptions: { onVolumeIssue }
   })
@@ -240,7 +244,8 @@ export default function (app: BackupServerAPI): Plugin {
         // manager or runtime is absent.
         const { state, image } = await container.getInfo()
         const containerImage =
-          image || `${BACKUP_IMAGE}:${resolveImageTag(currentSettings?.imageTag ?? 'auto')}`
+          image ||
+          `${BACKUP_IMAGE}:${resolveImageTag(currentSettings?.imageTag ?? 'auto', resolvedAutoTag)}`
 
         // WHY: pathMapping.hostPath is operator-facing; resolveSignalkConfigRoot is SK-internal when SK is in a container.
         const managed = currentSettings?.managedContainer !== false
@@ -278,6 +283,9 @@ export default function (app: BackupServerAPI): Plugin {
             return
           }
           currentSettings.imageTag = requestedTag
+          // Pin the result too, or the persisted short-circuit would undo this update next start.
+          currentSettings.resolvedImageTag = resolvedTag
+          resolvedAutoTag = resolvedTag
           await new Promise<void>((resolve) => {
             app.savePluginOptions({ ...currentSettings }, (err: NodeJS.ErrnoException | null) => {
               if (err) {
@@ -462,6 +470,22 @@ export default function (app: BackupServerAPI): Plugin {
     }
   }
 
+  // Lets the next start short-circuit without a lookup; a failed save costs a lookup, never startup.
+  async function persistResolvedTag(tag: string): Promise<void> {
+    if (!currentSettings || currentSettings.resolvedImageTag === tag) return
+    currentSettings.resolvedImageTag = tag
+    // Spread at call time, not before: a snapshot captured earlier would drop a
+    // concurrent settings edit (e.g. the db-export route) made while we awaited.
+    await new Promise<void>((resolve) => {
+      app.savePluginOptions({ ...currentSettings }, (err: NodeJS.ErrnoException | null) => {
+        if (err) {
+          app.debug(`Could not persist resolved image tag ${tag}: ${errMsg(err)}`)
+        }
+        resolve()
+      })
+    })
+  }
+
   async function asyncStart(settings: Config, gen: number, signal: AbortSignal): Promise<void> {
     if (!settings.managedContainer) {
       // External-server mode: skip the container, point at user-provided URL.
@@ -496,6 +520,27 @@ export default function (app: BackupServerAPI): Plugin {
         }
       )
       return
+    }
+
+    // Resolved here, not in resolveTag: that hook is sync and this needs the network.
+    if (settings.imageTag === 'auto') {
+      // Plugins start alphabetically, so signalk-container is often not on globalThis yet.
+      const { manager } = await waitForContainerManager({ timeoutMs: 30_000, signal })
+      if (gen !== lifecycleGeneration) return
+      const resolved = await resolveAutoTag({
+        manager: manager ?? getContainerManager(),
+        persisted: settings.resolvedImageTag,
+        floor: BACKUP_SERVER_VERSION,
+        debug: (msg) => {
+          app.debug(msg)
+        }
+      })
+      // Publish after the generation check: a superseded start must not clobber the live tag.
+      if (gen !== lifecycleGeneration) return
+      resolvedAutoTag = resolved
+      await persistResolvedTag(resolved)
+    } else {
+      resolvedAutoTag = null
     }
 
     // Managed-container mode. readinessRetry means this resolves only once the

@@ -10,6 +10,7 @@ export type {
   ContainerInfo,
   ContainerManagerApi,
   ContainerResourceLimits,
+  ContainerRuntimeInfo,
   ContainerState,
   EnsureRunningOptions,
   UpdateCheckResult,
