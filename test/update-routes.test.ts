@@ -164,3 +164,62 @@ describe('POST /api/update/apply', () => {
     expect(body(res).error).toMatch(/signalk-container/i)
   })
 })
+
+describe('container healthcheck', () => {
+  it('declares an explicit probe, because the compat socket drops the image one', async () => {
+    // Podman's Docker-compat socket strips an image's own HEALTHCHECK, so a
+    // container created through it never leaves `starting`. signalk-container
+    // only re-emits --health-* flags when the config carries them.
+    let captured:
+      | {
+          healthcheck?: {
+            test?: string[]
+            interval?: string
+            timeout?: string
+            startPeriod?: string
+            retries?: number
+          }
+        }
+      | undefined
+    installManager()
+    const manager = (globalThis as Record<string, unknown>)['__signalk_containerManager'] as {
+      ensureRunning: (n: string, c: unknown) => Promise<void>
+    }
+    // The helper reconciles via recreate() when the live image differs from
+    // the desired one and via ensureRunning() otherwise; capture both.
+    // Resolve a promise rather than sleeping: a fixed delay is a flake waiting
+    // for a slower CI runner.
+    let seen!: () => void
+    const captureDone = new Promise<void>((resolve) => {
+      seen = resolve
+    })
+    const capture = (_n: string, c: unknown) => {
+      captured = c as typeof captured
+      seen()
+      return Promise.resolve()
+    }
+    manager.ensureRunning = capture
+    ;(manager as unknown as { recreate: typeof capture }).recreate = capture
+
+    const { plugin } = await mountPlugin()
+    plugin.start(
+      { managedContainer: true, imageTag: 'latest', externalUrl: '', emitSignalKDeltas: false },
+      () => undefined
+    )
+    // start() is fire-and-forget, so wait for the container step itself.
+    await captureDone
+    await plugin.stop()
+
+    // CMD-SHELL keeps the script as ONE argv element; the CMD form is re-split
+    // on whitespace and arrives as `node -e const ...`, which is a syntax error.
+    expect(captured?.healthcheck?.test?.[0]).toBe('CMD-SHELL')
+    expect(captured?.healthcheck?.test?.length).toBe(2)
+    // The image ships neither curl nor wget; node is the only client present.
+    expect(captured?.healthcheck?.test?.[1]).toMatch(/^node -e /)
+    expect(captured?.healthcheck?.test?.join(' ')).toContain('/api/health')
+    expect(captured?.healthcheck?.startPeriod).toBe('15s')
+    expect(captured?.healthcheck?.interval).toBe('30s')
+    expect(captured?.healthcheck?.timeout).toBe('5s')
+    expect(captured?.healthcheck?.retries).toBe(3)
+  })
+})
