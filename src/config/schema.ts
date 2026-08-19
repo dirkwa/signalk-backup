@@ -22,10 +22,13 @@ export const ConfigSchema = Type.Object({
   }),
   resolvedImageTag: Type.String({
     default: '',
-    title: 'Resolved image version (read-only)',
+    // RJSF renders `readOnly` as a disabled input: the plugin overwrites this
+    // field on every start, so an edit here would silently vanish.
+    readOnly: true,
+    title: 'Resolved image version',
     description:
-      'Managed by the plugin: the concrete version "auto" resolved to. Cleared to re-resolve on next ' +
-      'start. Unused unless imageTag is "auto".'
+      'Managed by the plugin: the concrete version "auto" resolved to. Set imageTag to something ' +
+      'other than "auto" to pin a version; this field is not used then.'
   }),
   externalUrl: Type.String({
     default: '',
