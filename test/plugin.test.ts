@@ -9,6 +9,10 @@ describe('config schema', () => {
 
   it('default imageTag is "latest" so it tracks the newest published image', () => {
     expect(SCHEMA_DEFAULTS.imageTag).toBe('latest')
+    // The plugin overwrites resolvedImageTag on every start, so the form must
+    // not invite an edit that will silently vanish.
+    expect(ConfigSchema.properties.resolvedImageTag.readOnly).toBe(true)
+    expect(ConfigSchema.properties.imageTag.readOnly).toBeUndefined()
     // Empty until the first resolve; a stale value here would pin new installs.
     expect(SCHEMA_DEFAULTS.resolvedImageTag).toBe('')
   })
