@@ -36,6 +36,14 @@ const SK_MOUNT = '/signalk-data'
 const API_PORT = 3010
 const OAUTH_PORT = 53682
 
+// Podman's Docker-compat socket drops an image's own HEALTHCHECK, so a
+// container created through it has no probe and sits in `starting` forever.
+// signalk-container re-emits this as explicit --health-* run flags. Keep in
+// sync with the HEALTHCHECK in signalk-backup-server's Dockerfile, which is
+// the source of truth; the image ships neither curl nor wget, so node is the
+// only client available. http.get rather than fetch, matching that Dockerfile.
+const HEALTH_PROBE = `const r=require('http').get('http://127.0.0.1:${API_PORT}/api/health',res=>{res.resume();process.exit(res.statusCode===200?0:1)});r.on('error',()=>process.exit(1));r.setTimeout(5000,()=>{r.destroy();process.exit(1)})`
+
 // Readiness-retry backoff (15s doubling to a 2min ceiling, forever): a transient boot race must not wedge the plugin until a human restarts it — on a boat that can be weeks later.
 const READY_RETRY_MIN_MS = 15_000
 const READY_RETRY_MAX_MS = 120_000
@@ -118,6 +126,19 @@ export default function (app: BackupServerAPI): Plugin {
       LOG_LEVEL: 'info'
     },
     resources: DEFAULT_RESOURCES,
+    // CMD-SHELL, not CMD: the CMD form is re-split on whitespace before it
+    // reaches the runtime, which shreds the script into `node -e const ...`.
+    // The image ships /bin/sh, and the Dockerfile's own HEALTHCHECK uses the
+    // shell form too.
+    healthcheck: {
+      test: ['CMD-SHELL', `node -e ${JSON.stringify(HEALTH_PROBE)}`],
+      interval: '30s',
+      timeout: '5s',
+      // Covers container boot: the probe exits non-zero immediately
+      // (ECONNREFUSED) until the server is listening.
+      startPeriod: '15s',
+      retries: 3
+    },
     restart: 'unless-stopped'
   })
 
