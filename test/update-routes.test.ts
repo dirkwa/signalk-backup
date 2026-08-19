@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { mkdtemp, rm } from 'node:fs/promises'
 import createPlugin from '../src/index.js'
+import { SCHEMA_DEFAULTS } from '../src/config/schema.js'
 import type { BackupServerAPI } from '../src/types.js'
 
 // The webapp's container card is the only consumer of these routes and has no
@@ -64,7 +65,9 @@ function installManager(overrides: ManagerOverrides = {}) {
             ports: []
           }
         ])),
-    resolveContainerAddress: () => Promise.resolve('127.0.0.1:3010'),
+    // Port 1 never listens: a dev box running a real backup-server on 3010
+    // would otherwise satisfy a readiness probe this suite must never depend on.
+    resolveContainerAddress: () => Promise.resolve('127.0.0.1:1'),
     updates: {
       register: vi.fn(),
       unregister: vi.fn(),
@@ -121,33 +124,23 @@ describe('GET /api/update/check', () => {
 })
 
 describe('POST /api/update/apply', () => {
-  it('applies without a tag so the plugin re-resolves its own imageTag', async () => {
+  it('applies without a tag so the plugin resolves the configured default', async () => {
     // The card posts no tag on purpose: "latest" and "auto" must both land on
-    // the configured tag rather than a version the UI guessed.
-    const recreate = vi.fn(() => Promise.resolve())
-    installManager({ recreate })
-    const { server, plugin } = await mountPlugin()
-    plugin.start(
-      { managedContainer: true, imageTag: 'latest', externalUrl: '', emitSignalKDeltas: false },
-      () => undefined
-    )
-
-    const res = await request(server).post('/api/update/apply').send({})
-
-    expect(res.status).toBe(200)
-    expect(body(res).tag).toBe('latest')
-    await plugin.stop()
-  })
-
-  it('falls back to the configured default when the plugin never started', async () => {
-    // No start() means no lastStartedTag, so the route falls to defaultTag —
-    // which must track the schema default, not a stale hard-coded "auto".
+    // the configured tag rather than a version the UI guessed. With no prior
+    // start() the route falls through to defaultTag, which must track
+    // SCHEMA_DEFAULTS.imageTag rather than a stale hard-coded value.
+    //
+    // Deliberately no plugin.start() here: start() runs the real readiness
+    // probe, which retries forever by design. It only appeared to work
+    // locally because the fake address (127.0.0.1:3010) happens to be a real
+    // backup-server on a dev box; on CI nothing answers and the test hangs.
     installManager()
     const { server } = await mountPlugin()
 
     const res = await request(server).post('/api/update/apply').send({})
 
     expect(res.status).toBe(200)
+    expect(body(res).tag).toBe(SCHEMA_DEFAULTS.imageTag)
     expect(body(res).tag).toBe('latest')
   })
 
