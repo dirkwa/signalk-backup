@@ -16,6 +16,113 @@ import {
 import { api, formatBytes } from '../api'
 import { useApi } from '../useApi'
 
+function ContainerCard() {
+  // Poll while the container is coming back after an apply; the check reports
+  // 'unknown' until it is running again, so a single refresh lands too early.
+  const [settling, setSettling] = useState(false)
+  const update = useApi(() => api.checkUpdate(), { intervalMs: settling ? 5000 : 0 })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [applied, setApplied] = useState<string | null>(null)
+
+  const onApply = async (): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    setApplied(null)
+    try {
+      // No tag: the plugin re-resolves its configured imageTag, so "latest"
+      // and "auto" both land on the newest image without the UI guessing.
+      const { tag } = await api.applyUpdate()
+      setApplied(tag)
+      setSettling(true)
+      update.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const d = update.data
+
+  useEffect(() => {
+    if (settling && d && d.reason !== 'unknown') setSettling(false)
+  }, [settling, d])
+
+  return (
+    <Card className="mb-3">
+      <CardHeader>
+        <strong>Backup server container</strong>
+      </CardHeader>
+      <CardBody>
+        {update.loading && !d ? (
+          <Spinner size="sm" />
+        ) : update.error ? (
+          <Alert color="danger" className="mb-0">
+            {update.error}
+          </Alert>
+        ) : d ? (
+          <>
+            <dl className="row mb-2">
+              <dt className="col-sm-4">Running</dt>
+              <dd className="col-sm-8">
+                <code>{d.currentVersion ?? d.runningTag}</code>{' '}
+                {d.updateAvailable ? (
+                  <Badge color="warning">update available</Badge>
+                ) : d.reason === 'up-to-date' ? (
+                  <Badge color="success">up to date</Badge>
+                ) : (
+                  // 'unknown' (container not running) and 'error' both report
+                  // updateAvailable: false — a green "up to date" there would
+                  // claim a check succeeded when it never ran.
+                  <Badge color="secondary">not checked</Badge>
+                )}
+              </dd>
+              {d.latestVersion && (
+                <>
+                  <dt className="col-sm-4">Latest</dt>
+                  <dd className="col-sm-8">
+                    <code>{d.latestVersion}</code>
+                  </dd>
+                </>
+              )}
+            </dl>
+            {d.reason === 'offline' && (
+              <p className="text-muted small mb-2">Offline — showing the last successful check.</p>
+            )}
+            {d.reason === 'unknown' && !d.error && (
+              <p className="text-muted small mb-2">
+                No update check yet — the container is not running.
+              </p>
+            )}
+            {d.error && <p className="text-muted small mb-2">Last check failed: {d.error}</p>}
+            {d.updateAvailable && (
+              <>
+                <p className="text-muted small mb-2">
+                  Applying restarts the backup server. Backups in progress will be interrupted.
+                </p>
+                <Button color="primary" disabled={busy} onClick={() => void onApply()}>
+                  {busy ? <Spinner size="sm" /> : 'Apply update'}
+                </Button>
+              </>
+            )}
+            {applied && (
+              <Alert color="success" className="mt-2 mb-0">
+                Updated to {applied}. The container is restarting.
+              </Alert>
+            )}
+            {error && (
+              <Alert color="danger" className="mt-2 mb-0">
+                {error}
+              </Alert>
+            )}
+          </>
+        ) : null}
+      </CardBody>
+    </Card>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Scheduler card
 // ---------------------------------------------------------------------------
@@ -1036,6 +1143,7 @@ export function Settings() {
   return (
     <>
       <h2 className="mb-3">Settings</h2>
+      <ContainerCard />
       <SchedulerCard />
       <RetentionCard />
       <ExclusionsCard />

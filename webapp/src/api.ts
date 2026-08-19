@@ -1,3 +1,4 @@
+import type { UpdateCheckResult } from 'signalk-container-helper'
 // All API calls hit the plugin's reverse proxy at
 // /plugins/signalk-backup/api/*. Same origin as the SignalK admin UI,
 // so no CORS dance and we inherit SignalK's auth layer.
@@ -8,6 +9,8 @@ export interface BackupServerHealth {
   uptime?: number
   version?: string
 }
+
+export type { UpdateCheckResult }
 
 export interface PluginStatus {
   container: {
@@ -400,6 +403,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
+// The update routes bypass `request` because their errors are { error: string },
+// not the { success, error: { message } } envelope every backup-server route uses.
+async function updateRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(API_BASE + path, init)
+  const body = (await res.json().catch(() => null)) as unknown
+  if (!res.ok) {
+    const msg = (body as { error?: string } | null)?.error
+    throw new ApiError(msg ?? `HTTP ${res.status}`, res.status, undefined)
+  }
+  return body as T
+}
+
 export const api = {
   health: () => request<BackupServerHealth>('/health'),
 
@@ -692,6 +707,19 @@ export const api = {
       body: JSON.stringify({ password, confirmPassword: password })
     }),
   resetPassword: () => request<{ reset: boolean }>('/backups/password', { method: 'DELETE' }),
+
+  // Update check/apply are served by the plugin itself (ManagedContainer.registerUpdateRoutes),
+  // not proxied to backup-server, and answer with bare JSON rather than the { success, data }
+  // envelope — including on failure, where they send a bare { error: string } that `request`
+  // would flatten to "HTTP 503". Without signalk-container both return 503, which is the state
+  // a first-run install is in, so the message is worth keeping.
+  checkUpdate: () => updateRequest<UpdateCheckResult>('/update/check'),
+  applyUpdate: (tag?: string) =>
+    updateRequest<{ success: boolean; tag: string }>('/update/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(tag ? { tag } : {})
+    }),
 
   // Plugin's own /status (NOT proxied — no /api prefix).
   pluginStatus: async (): Promise<PluginStatus> => {

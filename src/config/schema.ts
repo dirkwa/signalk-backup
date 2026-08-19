@@ -10,11 +10,22 @@ export const ConfigSchema = Type.Object({
       'Disable to point at an external backup-server instance via "External URL".'
   }),
   imageTag: Type.String({
-    default: 'auto',
+    default: 'latest',
     title: 'Container image tag',
     description:
-      '"auto" (default) tracks the signalk-backup-server version this plugin release was tested against. ' +
-      'Pin to a specific version (e.g. "0.4.0") or use a floating tag (e.g. "latest") to override.'
+      '"latest" (default) always runs the newest published signalk-backup-server image. ' +
+      'Because it is a floating tag, the container manager detects updates by comparing image ' +
+      'digests, which downloads the image on each check and reports "image rebuild available" ' +
+      'rather than a version number. Pin a specific version (e.g. "1.0.0") for version-to-version ' +
+      'update notices and no background downloads, or "auto" to track the newest release as a ' +
+      'concrete version.'
+  }),
+  resolvedImageTag: Type.String({
+    default: '',
+    title: 'Resolved image version (read-only)',
+    description:
+      'Managed by the plugin: the concrete version "auto" resolved to. Cleared to re-resolve on next ' +
+      'start. Unused unless imageTag is "auto".'
   }),
   externalUrl: Type.String({
     default: '',
@@ -48,7 +59,8 @@ export type Config = Static<typeof ConfigSchema> & {
 // SignalK uses schema `default` only to seed the form, not the runtime config — spread these in start(). See AGENTS.md gotchas.
 export const SCHEMA_DEFAULTS: Config = {
   managedContainer: true,
-  imageTag: 'auto',
+  imageTag: 'latest',
+  resolvedImageTag: '',
   externalUrl: '',
   emitSignalKDeltas: true,
   databaseExport: {

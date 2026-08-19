@@ -109,6 +109,9 @@ describe('embedded webapp in the Signal K admin UI', () => {
       const tab = (name: string) => page.getByRole('main').getByRole('link', { name, exact: true })
       await tab('Settings').click()
       await tab('Settings').and(page.locator('.active')).waitFor({ timeout: 10_000 })
+      // The container card renders from a live /api/update/check call, so this
+      // also proves the plugin's own (non-proxied) routes are reachable.
+      await page.getByRole('main').getByText('Backup server container').waitFor({ timeout: 10_000 })
       await tab('Dashboard').click()
       await tab('Dashboard').and(page.locator('.active')).waitFor({ timeout: 10_000 })
 
