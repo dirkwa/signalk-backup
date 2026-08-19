@@ -7,8 +7,8 @@ describe('config schema', () => {
     expect(Value.Check(ConfigSchema, SCHEMA_DEFAULTS)).toBe(true)
   })
 
-  it('default imageTag is "auto" so it tracks the newest server release', () => {
-    expect(SCHEMA_DEFAULTS.imageTag).toBe('auto')
+  it('default imageTag is "latest" so it tracks the newest published image', () => {
+    expect(SCHEMA_DEFAULTS.imageTag).toBe('latest')
     // Empty until the first resolve; a stale value here would pin new installs.
     expect(SCHEMA_DEFAULTS.resolvedImageTag).toBe('')
   })

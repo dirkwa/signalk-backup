@@ -1,3 +1,4 @@
+import type { UpdateCheckResult } from 'signalk-container-helper'
 // All API calls hit the plugin's reverse proxy at
 // /plugins/signalk-backup/api/*. Same origin as the SignalK admin UI,
 // so no CORS dance and we inherit SignalK's auth layer.
@@ -8,6 +9,8 @@ export interface BackupServerHealth {
   uptime?: number
   version?: string
 }
+
+export type { UpdateCheckResult }
 
 export interface PluginStatus {
   container: {
@@ -692,6 +695,21 @@ export const api = {
       body: JSON.stringify({ password, confirmPassword: password })
     }),
   resetPassword: () => request<{ reset: boolean }>('/backups/password', { method: 'DELETE' }),
+
+  // Update check/apply are served by the plugin itself (ManagedContainer.registerUpdateRoutes),
+  // not proxied to backup-server, and answer with bare JSON rather than the { success, data } envelope.
+  checkUpdate: () => request<UpdateCheckResult>('/update/check'),
+  applyUpdate: async (tag?: string): Promise<{ tag: string }> => {
+    const res = await fetch(API_BASE + '/update/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(tag ? { tag } : {})
+    })
+    const body = (await res.json().catch(() => null)) as { tag?: string; error?: string } | null
+    // The helper reports failures as a bare { error }, which `request` would flatten to "HTTP 500".
+    if (!res.ok) throw new ApiError(body?.error ?? `HTTP ${res.status}`, res.status, undefined)
+    return { tag: body?.tag ?? '' }
+  },
 
   // Plugin's own /status (NOT proxied — no /api prefix).
   pluginStatus: async (): Promise<PluginStatus> => {

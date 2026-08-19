@@ -51,7 +51,8 @@ describe('isConcreteSemver', () => {
   })
 
   it('rejects floating and malformed tags', () => {
-    // The whole point: a floating tag must never reach signalk-container.
+    // Gates the "auto" lookup only: a user-set "latest" is a valid tag and is
+    // the default, it just must never be what "auto" resolves to.
     expect(isConcreteSemver('latest')).toBe(false)
     expect(isConcreteSemver('auto')).toBe(false)
     expect(isConcreteSemver('1.0')).toBe(false)

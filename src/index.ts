@@ -147,10 +147,8 @@ export default function (app: BackupServerAPI): Plugin {
     name: CONTAINER_NAME,
     image: BACKUP_IMAGE,
     buildConfig: buildContainerConfig,
-    defaultTag: 'auto',
-    // 'auto' → the pinned, tested backup-server version. Applied to start(),
-    // applyUpdate() and route input alike, and the helper validates both the
-    // requested and the resolved tag (replacing the old SAFE_TAG check).
+    defaultTag: SCHEMA_DEFAULTS.imageTag,
+    // Maps "auto" to a concrete version; every other tag passes through.
     resolveTag: resolveImageTag,
     managerTimeoutMs: 120_000,
     readiness: {
@@ -169,7 +167,8 @@ export default function (app: BackupServerAPI): Plugin {
     },
     updates: {
       versionSource: { githubReleases: BACKUP_SERVER_REPO },
-      currentTag: () => resolveImageTag(currentSettings?.imageTag ?? 'auto', resolvedAutoTag)
+      currentTag: () =>
+        resolveImageTag(currentSettings?.imageTag ?? SCHEMA_DEFAULTS.imageTag, resolvedAutoTag)
     },
     ensureOptions: { onVolumeIssue }
   })
@@ -245,7 +244,7 @@ export default function (app: BackupServerAPI): Plugin {
         const { state, image } = await container.getInfo()
         const containerImage =
           image ||
-          `${BACKUP_IMAGE}:${resolveImageTag(currentSettings?.imageTag ?? 'auto', resolvedAutoTag)}`
+          `${BACKUP_IMAGE}:${resolveImageTag(currentSettings?.imageTag ?? SCHEMA_DEFAULTS.imageTag, resolvedAutoTag)}`
 
         // WHY: pathMapping.hostPath is operator-facing; resolveSignalkConfigRoot is SK-internal when SK is in a container.
         const managed = currentSettings?.managedContainer !== false
@@ -471,7 +470,11 @@ export default function (app: BackupServerAPI): Plugin {
   }
 
   // Lets the next start short-circuit without a lookup; a failed save costs a lookup, never startup.
-  async function persistResolvedTag(tag: string): Promise<void> {
+  async function persistResolvedTag(tag: string, gen: number): Promise<void> {
+    // savePluginOptions writes the whole options object and itself re-runs
+    // start(), so a save from a superseded lifecycle would republish that
+    // generation's imageTag over whatever the user has since saved.
+    if (gen !== lifecycleGeneration) return
     if (!currentSettings || currentSettings.resolvedImageTag === tag) return
     currentSettings.resolvedImageTag = tag
     // Spread at call time, not before: a snapshot captured earlier would drop a
@@ -538,7 +541,7 @@ export default function (app: BackupServerAPI): Plugin {
       // Publish after the generation check: a superseded start must not clobber the live tag.
       if (gen !== lifecycleGeneration) return
       resolvedAutoTag = resolved
-      await persistResolvedTag(resolved)
+      await persistResolvedTag(resolved, gen)
     } else {
       resolvedAutoTag = null
     }
