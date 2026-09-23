@@ -1,5 +1,5 @@
 // Offline floor for "auto", not the target — never couple it to this plugin's own version. See AGENTS.md.
-export const BACKUP_SERVER_VERSION = '1.0.0'
+export const BACKUP_SERVER_VERSION = '1.0.1'
 
 // Shared by the startup resolver and the update registration so the two cannot drift.
 export const BACKUP_SERVER_REPO = 'dirkwa/signalk-backup-server'

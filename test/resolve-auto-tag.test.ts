@@ -23,6 +23,25 @@ function makeManager(
 const silent = () => {}
 
 describe('resolveAutoTag', () => {
+  // A boat already on "auto" has the previous version persisted, and the
+  // persisted tag short-circuits the lookup — so raising the floor is what
+  // releases it, not the new release existing.
+  it('lets a raised floor move a boat off its persisted tag', async () => {
+    const { manager, fetchSpy } = makeManager(() =>
+      Promise.resolve({ kind: 'version', latest: '1.0.1' })
+    )
+
+    expect(
+      await resolveAutoTag({ manager, persisted: '1.0.0', floor: '1.0.0', debug: silent })
+    ).toBe('1.0.0')
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    expect(
+      await resolveAutoTag({ manager, persisted: '1.0.0', floor: '1.0.1', debug: silent })
+    ).toBe('1.0.1')
+    expect(fetchSpy).toHaveBeenCalled()
+  })
+
   it('returns the newest release when it is concrete semver above the floor', async () => {
     const { manager } = makeManager(() => Promise.resolve({ kind: 'version', latest: '1.1.0' }))
     expect(await resolveAutoTag({ manager, persisted: '', floor: FLOOR, debug: silent })).toBe(
