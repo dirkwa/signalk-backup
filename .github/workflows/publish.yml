@@ -21,7 +21,7 @@ jobs:
   # hand-pushed pre-release tag needs one made here; running for every tag
   # would collide with the Release that already exists.
   release:
-    if: ${{ contains(github.ref_name, '-') }}
+    if: ${{ contains(split(github.ref_name, '+')[0], '-') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -83,6 +83,17 @@ jobs:
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+
+      # npm publish uses the checked-out package.json, not the tag — so a tag
+      # that names a different version would publish under the wrong one, and
+      # a stable tag would move `latest` to it.
+      - name: Tag matches package.json
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          if [ "v$pkg" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json $pkg"
+            exit 1
+          fi
 
       - run: npm install
 

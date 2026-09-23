@@ -50,7 +50,7 @@ jobs:
             echo "Run requested manually; release-please not gated."
             exit 0
           fi
-          if jq -e --arg re "$RELEASABLE" '(length >= 2048) or ([.[] | (split("\n")[0] | test($re)) or test("\nBREAKING[- ]CHANGE: ") or test("\nRelease-As: ")] | any)' <<< "$MESSAGES" > /dev/null; then
+          if jq -e --arg re "$RELEASABLE" '(length >= 2048) or ([.[] | (split("\n")[0] | test($re)) or test("\nBREAKING[- ]CHANGE: ") or test("\nRelease-As: "; "i")] | any)' <<< "$MESSAGES" > /dev/null; then
             echo "releasable=true" >> "$GITHUB_OUTPUT"
           else
             echo "releasable=false" >> "$GITHUB_OUTPUT"
