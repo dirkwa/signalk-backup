@@ -136,6 +136,7 @@ curl http://127.0.0.1:<sk-port>/plugins/signalk-questdb/api/full-export/tables
 - **Angular conventional commits** (`feat:`, `fix:`, `chore:`, `docs:`, `ci:`, `test:`, `refactor:`). Subject in imperative mood. **No `Co-Authored-By` lines.**
 - **Branch names use hyphens, not slashes.** Signal K maintainers' convention.
 - **TypeScript is strict.** Don't add `as any` to silence errors — fix the type.
-- **One logical change per PR.** Refactors, behavior changes, dep bumps belong in separate PRs. The `chore(release): X.Y.Z` commit is its own PR.
+- **One logical change per PR.** Refactors, behavior changes, dep bumps belong in separate PRs.
+- **release-please owns the release.** Merging a releasable commit to `main` opens a `chore: release X.Y.Z` PR that bumps `package.json`; merging that creates the tag and the GitHub Release, then dispatches `publish.yml` on the tag to publish to npm. Never write a version bump by hand. The bump follows the commit type — `feat` minor, `fix`/`perf` patch, `!` or a `BREAKING CHANGE:` footer major; a `Release-As: X.Y.Z` footer pins a specific version. A release is only proposed when the push carries a commit users get; the `gate` job in `.github/workflows/release-please.yml` is the authority on what counts. Merging the release PR is what publishes, so it needs approval like any other publish.
 - **PR descriptions:** `## Summary` (bullets, why-not-what) and `## Tested` (only what was actually verified — no speculative test plans, no checkbox lists).
 - **Don't write multi-line comment blocks or docstrings.** A short single-line comment for a non-obvious WHY is fine; everything else is noise.
