@@ -17,11 +17,17 @@ on:
   workflow_dispatch:
 
 jobs:
-  # release-please creates the GitHub Release for a real version, so only a
-  # hand-pushed pre-release tag needs one made here; running for every tag
-  # would collide with the Release that already exists.
+  # release-please reaches this workflow only by dispatch, and it has already
+  # created the Release for the tag it dispatches on. A push therefore means a
+  # tag someone pushed by hand, which is the only case that needs one made
+  # here. Testing the event rather than the tag's shape also keeps this off
+  # the question of what counts as a pre-release.
   release:
-    if: ${{ contains(split(github.ref_name, '+')[0], '-') }}
+    # After the publish, not beside it: the jobs are otherwise parallel, so a
+    # tag that publish rejects — one disagreeing with package.json, or a failed
+    # build — would still get a Release announcing a version nobody can install.
+    needs: publish
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -41,22 +47,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Always true: the job's own condition already limits it to tags carrying
-      # a pre-release part, so an identifier other than -beta./-rc. cannot be
-      # published here as a full release.
+      # Expressions have no split(), and build metadata may carry a hyphen
+      # while the version is stable — so the pre-release part is read in the
+      # shell, where this can agree with the dist-tag the publish job picks.
+      - name: Classify the tag
+        id: tag
+        run: |
+          core="${GITHUB_REF_NAME%%+*}"
+          case "$core" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           generate_release_notes: true
-          prerelease: true
+          prerelease: ${{ steps.tag.outputs.prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish:
-    # No `needs: release`: that job is pre-release-only now, and a real
-    # release must still publish when it is skipped.
+    # A dispatch can name any ref; only a release tag is published.
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-24.04
     permissions:
