@@ -6,13 +6,22 @@ name: Publish Package
 # leading digits only; the publish step routes them to npm's `beta`
 # dist-tag instead of `latest`.
 
+# A real release's tag and GitHub Release are both created by release-please,
+# which then dispatches this workflow on the tag — a tag pushed with
+# GITHUB_TOKEN starts no workflow, and npm's trusted publishing is bound to
+# this filename, so the dispatch is how publishing happens.
 on:
   push:
     tags:
       - 'v[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch:
 
 jobs:
+  # release-please creates the GitHub Release for a real version, so only a
+  # hand-pushed pre-release tag needs one made here; running for every tag
+  # would collide with the Release that already exists.
   release:
+    if: ${{ contains(github.ref_name, '-') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -32,18 +41,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Always true: the job's own condition already limits it to tags carrying
+      # a pre-release part, so an identifier other than -beta./-rc. cannot be
+      # published here as a full release.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-beta.') || contains(github.ref_name, '-rc.') }}
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish:
-    needs: release
+    # No `needs: release`: that job is pre-release-only now, and a real
+    # release must still publish when it is skipped.
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-24.04
     permissions:
       id-token: write
@@ -69,8 +83,14 @@ jobs:
         run: npm test
 
       - name: Publish
+        env:
+          REF: ${{ github.ref }}
+        # Any tag carrying a semver pre-release part goes to the `beta`
+        # dist-tag, not just -beta./-rc. Enumerating identifiers would send an
+        # unlisted one such as -alpha.1 to `latest`, where a plain npm install
+        # would hand it to every user as the current release.
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/*-beta.* ]] || [[ "${{ github.ref }}" == refs/tags/*-rc.* ]]; then
+          if [[ "${REF#refs/tags/}" =~ ^v[^+-]+- ]]; then
             npm publish --provenance --access public --tag beta
           else
             npm publish --provenance --access public
