@@ -18,8 +18,12 @@ const pkgVersion = (
 // else with `import: false` — including sub-paths such as react-dom/client,
 // which @module-federation/vite registers automatically for any module in the
 // remote's graph that imports one — makes the remote throw "Shared module
-// '…' must be provided by host" at load. scripts/check-federation-shares.mjs
-// fails the build if the emitted share map ever grows past this list.
+// '…' must be provided by host" at load. Nothing in the build checks that list
+// any more — scripts/check-federation-shares.mjs used to read the emitted share
+// map, and @module-federation/vite kept changing how it writes one — so the
+// `e2e` job is what catches it, by loading the panel and failing on any
+// federation error. The build gate now only catches a second React being
+// bundled, which is the other half of the same failure.
 const HOST_PROVIDED = ['react', 'react-dom'] as const
 
 export default defineConfig(({ command }) => ({
