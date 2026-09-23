@@ -1,19 +1,17 @@
 #!/usr/bin/env node
 /**
- * Build gate for the federated webapp's share map.
+ * Build gate for the federated webapp: the remote must not carry its own React.
  *
- * The Signal K admin UI host provides exactly `react` and `react-dom` in its
- * Module Federation share scope. If the emitted remote declares any other
- * shared module with `import: false` (its getter throws "must be provided by
- * host"), the panel fails to load for every user — and nothing else in the
- * build says so: 0.9.4 (#94) and 0.10.1 (#108) both shipped that way with a
- * green build. This script fails `npm run build` instead.
+ * The Signal K admin UI provides React through Module Federation. A remote that
+ * bundles a second copy runs a second dispatcher, so every hook reads null and
+ * the panel fails to load for every user — 0.9.4 (#94) and 0.10.1 (#108) both
+ * shipped that way with a green build.
  *
- * It reads the emitted localSharedImportMap chunk rather than trusting
- * vite.config.ts, because the plugin adds shares on its own (sub-paths such as
- * react-dom/client for any importer in the graph) and did so non-
- * deterministically. Two independent readings, so a format change in
- * @module-federation/vite fails closed instead of passing silently.
+ * The test is React's own production error formatter. That string lives inside
+ * React, so it reaches the remote only when React does. It is a property of
+ * what got bundled rather than of how @module-federation/vite chose to write
+ * the share map — which is what the previous version of this script read, and
+ * why a minifier refactor in 1.22.1 failed it on a correct build.
  */
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -21,13 +19,19 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const publicDir = join(root, 'public')
-const assetsDir = join(publicDir, 'assets')
 
-// What the host share scope contains (server-admin-ui dynamicutilities.ts).
-const HOST_PROVIDED = new Set(['react', 'react-dom'])
-// Everything the remote may declare as shared: host-provided modules plus
-// the JSX runtimes it ships a bundled fallback for (vite.config.ts).
-const ALLOWED_SHARED = new Set([...HOST_PROVIDED, 'react/jsx-runtime', 'react/jsx-dev-runtime'])
+// React's element marker, present in react's own production build. Chosen over
+// the `Minified React error` formatter, which ships in react-dom but not react —
+// a remote bundling react alone would have passed that test while still running
+// a second dispatcher.
+const REACT_INTERNALS = 'react.transitional.element'
+
+// vite.config.ts deliberately bundles a ~1 kB react/jsx-runtime fallback,
+// because the admin UI does not pre-register JSX sub-paths. That fallback
+// carries the element marker but none of React itself, so the hook dispatcher
+// is what separates it from a real copy — and unlike the chunk's name, which
+// @module-federation has already renamed once, that is a property of the code.
+const REACT_RUNTIME = 'useState'
 
 function fail(msg) {
   console.error(`\n✖ check-federation-shares: ${msg}\n`)
@@ -36,51 +40,41 @@ function fail(msg) {
 
 if (!existsSync(join(publicDir, 'remoteEntry.js')))
   fail('public/remoteEntry.js not found — run vite build first')
-if (!existsSync(assetsDir)) fail('public/assets/ not found')
 
-const mapFiles = readdirSync(assetsDir).filter(
-  (f) => f.includes('localSharedImportMap') && f.endsWith('.js')
-)
-if (mapFiles.length !== 1) {
-  fail(
-    `expected exactly one localSharedImportMap chunk in public/assets, found ${mapFiles.length}: ${mapFiles.join(', ') || '(none)'} — has @module-federation/vite changed its output layout? Update this script.`
-  )
+function jsFiles(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = join(dir, e.name)
+    if (e.isDirectory()) return jsFiles(p)
+    // Source maps carry React's strings without shipping its code.
+    return e.name.endsWith('.js') ? [p] : []
+  })
 }
-const source = readFileSync(join(assetsDir, mapFiles[0]), 'utf-8')
 
-// Reading 1: every share entry's `name` field.
-const declared = new Set([...source.matchAll(/\bname:\s*[`'"]([^`'"]+)[`'"]/g)].map((m) => m[1]))
-// Reading 2: every module whose getter throws the host-provided error.
-const hostOnly = new Set(
-  [...source.matchAll(/Shared module '([^']+)' must be provided by host/g)].map((m) => m[1])
-)
+const files = jsFiles(publicDir)
+if (files.length === 0) fail('no .js emitted under public/ — run vite build first')
 
-if (declared.size === 0 || hostOnly.size === 0) {
+// A build that stops emitting the share map has stopped federating, and the
+// scan below would pass on the plain chunks it still writes.
+if (!files.some((f) => f.includes('localSharedImportMap'))) {
   fail(
-    `could not read the share map from ${mapFiles[0]} (names: ${declared.size}, host-only: ${hostOnly.size}) — has @module-federation/vite changed its output format? Update this script.`
+    'no localSharedImportMap chunk under public/ — the build emitted no share map, so the ' +
+      'panel would not load in the admin UI. Has the federation plugin stopped running?'
   )
 }
 
-const unexpectedShared = [...declared].filter((n) => !ALLOWED_SHARED.has(n))
-const unexpectedHostOnly = [...hostOnly].filter((n) => !HOST_PROVIDED.has(n))
-const missingHostOnly = [...HOST_PROVIDED].filter((n) => !hostOnly.has(n))
+const offenders = files.filter((f) => {
+  const src = readFileSync(f, 'utf-8')
+  return src.includes(REACT_INTERNALS) && src.includes(REACT_RUNTIME)
+})
 
-if (unexpectedHostOnly.length > 0) {
+if (offenders.length > 0) {
   fail(
-    `the remote expects the host to provide ${unexpectedHostOnly.map((n) => `'${n}'`).join(', ')}, but the Signal K admin UI only provides ${[...HOST_PROVIDED].join(', ')}. The panel would fail with "Shared module '${unexpectedHostOnly[0]}' must be provided by host" (#108). Something in the build graph imports that module — keep it out of the remote (see vite.config.ts).`
-  )
-}
-if (unexpectedShared.length > 0) {
-  fail(
-    `unexpected shared modules in the remote: ${unexpectedShared.join(', ')}. Add them to vite.config.ts and this allowlist only after confirming the admin UI panel still loads (npm run test:e2e).`
-  )
-}
-if (missingHostOnly.length > 0) {
-  fail(
-    `${missingHostOnly.join(', ')} no longer shared with import: false — the remote would bundle its own copy and the panel breaks with two React instances.`
+    `the remote bundles its own React: ${offenders.map((f) => f.slice(root.length + 1)).join(', ')}. ` +
+      `The admin UI provides React through the share scope, so a second copy means a second ` +
+      `dispatcher and every hook reads null (#94, #108). Check the \`shared\` block in ` +
+      `vite.config.ts — a sub-path importer (react-dom/client, a JSX runtime) pulls React in ` +
+      `when it is not declared there.`
   )
 }
 
-console.log(
-  `✔ check-federation-shares: shared=[${[...declared].sort().join(', ')}] host-provided=[${[...hostOnly].sort().join(', ')}]`
-)
+console.log(`✔ check-federation-shares: no bundled React in ${files.length} emitted chunks`)
