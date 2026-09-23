@@ -36,11 +36,19 @@ jobs:
           # skip-changelog on top — release.yml's exclude wins over its
           # categories.
           managed="enhancement bug skip-changelog"
-          conventional='^([a-z]+)(\(([^)]*)\))?!?: '
-          type=""; scope=""
+          conventional='^([a-z]+)(\(([^)]*)\))?(!)?: '
+          type=""; scope=""; breaking=""
           if [[ "$TITLE" =~ $conventional ]]; then
-            type="${BASH_REMATCH[1]}"; scope="${BASH_REMATCH[3]}"
+            type="${BASH_REMATCH[1]}"; scope="${BASH_REMATCH[3]}"; breaking="${BASH_REMATCH[4]}"
           fi
+          # A `!` is releasable whatever the type, so it must never be hidden
+          # from the notes it belongs at the top of.
+          if [ -n "$breaking" ]; then
+            case "$type" in
+              fix) wanted=bug ;;
+              *) wanted=enhancement ;;
+            esac
+          else
           case "$type" in
             feat|perf) wanted=enhancement ;;
             fix) wanted=bug ;;
@@ -48,6 +56,7 @@ jobs:
             build) [ "$scope" = deps-dev ] && wanted=skip-changelog || wanted="" ;;
             *) wanted="" ;;
           esac
+          fi
           current=$(gh pr view "$NUMBER" --repo "$REPO" --json labels --jq '[.labels[].name] | join(" ")')
           args=()
           for label in $managed; do
