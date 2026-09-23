@@ -7,11 +7,11 @@
  * the panel fails to load for every user — 0.9.4 (#94) and 0.10.1 (#108) both
  * shipped that way with a green build.
  *
- * The test is React's own production error formatter. That string lives inside
- * React, so it reaches the remote only when React does. It is a property of
- * what got bundled rather than of how @module-federation/vite chose to write
- * the share map — which is what the previous version of this script read, and
- * why a minifier refactor in 1.22.1 failed it on a correct build.
+ * The test is React's element marker together with a hook, in one chunk. Both
+ * live inside React, so they reach the remote only when React does — a property
+ * of what got bundled rather than of how @module-federation/vite chose to write
+ * the share map, which is what the previous version of this script read and why
+ * a minifier refactor in 1.22.1 failed it on a correct build.
  */
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
