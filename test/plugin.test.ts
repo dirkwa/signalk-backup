@@ -7,8 +7,8 @@ describe('config schema', () => {
     expect(Value.Check(ConfigSchema, SCHEMA_DEFAULTS)).toBe(true)
   })
 
-  it('default imageTag is "latest" so it tracks the newest published image', () => {
-    expect(SCHEMA_DEFAULTS.imageTag).toBe('latest')
+  it('default imageTag is "auto" so updates read as versions, not digest drift', () => {
+    expect(SCHEMA_DEFAULTS.imageTag).toBe('auto')
     // The plugin overwrites resolvedImageTag on every start, so the form must
     // not invite an edit that will silently vanish.
     expect(ConfigSchema.properties.resolvedImageTag.readOnly).toBe(true)

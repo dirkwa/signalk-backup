@@ -65,7 +65,7 @@ The webapp has four tabs:
 Most settings live in the **webapp** under Settings. The plugin's SignalK Admin UI config panel is intentionally small and handles only deployment-level options (the schema in [src/config/schema.ts](src/config/schema.ts) is the source of truth — update this list if you bump it):
 
 - `managedContainer` — let the plugin manage the backup-server container (default), or point at an external instance
-- `imageTag` — pin a specific version or use `auto` (default — resolves to the BACKUP_SERVER_VERSION constant)
+- `imageTag` — `auto` (default) runs a specific server version and moves to a newer one when you update this plugin, so backups keep running the version they were tested against and update notices name versions rather than "image rebuild available". Pin a version to stay on it. `latest` follows the floating tag instead, which re-downloads the image (~400MB) on every update check.
 - `externalUrl` — only used when `managedContainer: false`
 - `emitSignalKDeltas` — publish backup health to the SignalK delta stream (default on; disable if you don't want these paths in your delta feed)
 - `databaseExport.{questdb, grafana, signalkDatabase}` — enable per-exporter (default off; users opt in once their DB plugin is producing data)

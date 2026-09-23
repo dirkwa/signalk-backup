@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { mkdtemp, rm } from 'node:fs/promises'
 import createPlugin from '../src/index.js'
-import { SCHEMA_DEFAULTS } from '../src/config/schema.js'
+import { BACKUP_SERVER_VERSION, isConcreteSemver } from '../src/config/image-tag.js'
 import type { BackupServerAPI } from '../src/types.js'
 
 // The webapp's container card is the only consumer of these routes and has no
@@ -128,7 +128,8 @@ describe('POST /api/update/apply', () => {
     // The card posts no tag on purpose: "latest" and "auto" must both land on
     // the configured tag rather than a version the UI guessed. With no prior
     // start() the route falls through to defaultTag, which must track
-    // SCHEMA_DEFAULTS.imageTag rather than a stale hard-coded value.
+    // the configured default, which is "auto" and must reach the runtime
+    // already resolved to a concrete version.
     //
     // Deliberately no plugin.start() here: start() runs the real readiness
     // probe, which retries forever by design. It only appeared to work
@@ -140,8 +141,11 @@ describe('POST /api/update/apply', () => {
     const res = await request(server).post('/api/update/apply').send({})
 
     expect(res.status).toBe(200)
-    expect(body(res).tag).toBe(SCHEMA_DEFAULTS.imageTag)
-    expect(body(res).tag).toBe('latest')
+    // "auto" is resolved before the runtime sees it — a floating tag here
+    // would defeat the version comparison the default exists to get.
+    const tag = body(res).tag
+    expect(tag).toBe(BACKUP_SERVER_VERSION)
+    expect(tag !== undefined && isConcreteSemver(tag)).toBe(true)
   })
 
   it('rejects a malformed tag before touching the runtime', async () => {

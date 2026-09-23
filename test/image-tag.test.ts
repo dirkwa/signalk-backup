@@ -7,6 +7,13 @@ import {
 } from '../src/config/image-tag.js'
 
 describe('resolveImageTag', () => {
+  // The floor is the version an offline or first-boot "auto" install gets, and
+  // it gates the persisted tag — a boat on the previous version stays there
+  // until the floor passes it. Bump it when a server release lands.
+  it('floors "auto" at the newest server release this plugin shipped against', () => {
+    expect(BACKUP_SERVER_VERSION).toBe('1.0.1')
+  })
+
   it('"auto" resolves to BACKUP_SERVER_VERSION', () => {
     expect(resolveImageTag('auto')).toBe(BACKUP_SERVER_VERSION)
   })
