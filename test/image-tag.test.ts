@@ -11,7 +11,7 @@ describe('resolveImageTag', () => {
   // it gates the persisted tag — a boat on the previous version stays there
   // until the floor passes it. Bump it when a server release lands.
   it('floors "auto" at the newest server release this plugin shipped against', () => {
-    expect(BACKUP_SERVER_VERSION).toBe('1.0.1')
+    expect(BACKUP_SERVER_VERSION).toBe('1.0.2')
   })
 
   it('"auto" resolves to BACKUP_SERVER_VERSION', () => {
