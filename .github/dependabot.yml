@@ -27,6 +27,19 @@ updates:
       # panel in a real admin UI. That is the check a version pin was
       # standing in for (#94, #108).
 
+  # The signalk-backup-server version the plugin ships against (see
+  # server-image/Dockerfile). A server release becomes a
+  # `build(deps): bump ghcr.io/dirkwa/signalk-backup-server` PR, which the
+  # release-please gate counts as releasable, so merging it ships the server
+  # to every "auto" install via a plugin patch release.
+  - package-ecosystem: docker
+    directory: "/server-image"
+    schedule:
+      interval: daily
+    commit-message:
+      prefix: build
+      include: scope
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:

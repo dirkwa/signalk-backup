@@ -44,6 +44,7 @@
   },
   "files": [
     "plugin/**/*",
+    "server-image/Dockerfile",
     "LICENSE.md",
     "LICENSE-Apache-2.0-through-v0.x.txt",
     "CONTRIBUTING.md",

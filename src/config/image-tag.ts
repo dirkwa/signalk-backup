@@ -1,5 +1,4 @@
-// Offline floor for "auto", not the target — never couple it to this plugin's own version. See AGENTS.md.
-export const BACKUP_SERVER_VERSION = '1.0.2'
+import { readFileSync } from 'node:fs'
 
 // Shared by the startup resolver and the update registration so the two cannot drift.
 export const BACKUP_SERVER_REPO = 'dirkwa/signalk-backup-server'
@@ -13,6 +12,21 @@ const SEMVER_PATTERN = new RegExp(
 
 export function isConcreteSemver(tag: string): boolean {
   return SEMVER_PATTERN.test(tag)
+}
+
+// Offline floor for "auto", not the target — never couple it to this plugin's own version. See AGENTS.md.
+// Read from server-image/Dockerfile, which Dependabot bumps when a server release is published.
+// src/config/ and plugin/config/ sit at the same depth, so one relative path serves tests and the package.
+export const SERVER_PIN_FILE = new URL('../../server-image/Dockerfile', import.meta.url)
+export const BACKUP_SERVER_VERSION = parseServerPin(readFileSync(SERVER_PIN_FILE, 'utf8'))
+
+export function parseServerPin(dockerfile: string): string {
+  const match = /^FROM\s+ghcr\.io\/dirkwa\/signalk-backup-server:(\S+)\s*$/m.exec(dockerfile)
+  const tag = match?.[1]
+  if (!tag || !isConcreteSemver(tag)) {
+    throw new Error('server-image/Dockerfile must pin signalk-backup-server to a concrete version')
+  }
+  return tag
 }
 
 // Returns <0, 0 or >0. Both arguments must satisfy isConcreteSemver.
