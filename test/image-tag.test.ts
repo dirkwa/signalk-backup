@@ -1,17 +1,29 @@
+import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
 import {
   BACKUP_SERVER_VERSION,
+  SERVER_PIN_FILE,
   compareSemver,
   isConcreteSemver,
+  parseServerPin,
   resolveImageTag
 } from '../src/config/image-tag.js'
 
 describe('resolveImageTag', () => {
   // The floor is the version an offline or first-boot "auto" install gets, and
   // it gates the persisted tag — a boat on the previous version stays there
-  // until the floor passes it. Bump it when a server release lands.
-  it('floors "auto" at the newest server release this plugin shipped against', () => {
-    expect(BACKUP_SERVER_VERSION).toBe('1.0.2')
+  // until the floor passes it. Dependabot bumps it in server-image/Dockerfile.
+  it('floors "auto" at the server version pinned in server-image/Dockerfile', () => {
+    const pin = readFileSync(SERVER_PIN_FILE, 'utf8')
+    expect(pin).toContain(`FROM ghcr.io/dirkwa/signalk-backup-server:${BACKUP_SERVER_VERSION}\n`)
+  })
+
+  it('reads the pin from the FROM line and rejects a floating or missing tag', () => {
+    expect(parseServerPin('# comment\nFROM ghcr.io/dirkwa/signalk-backup-server:1.2.3\n')).toBe(
+      '1.2.3'
+    )
+    expect(() => parseServerPin('FROM ghcr.io/dirkwa/signalk-backup-server:latest\n')).toThrow()
+    expect(() => parseServerPin('FROM ghcr.io/dirkwa/other:1.2.3\n')).toThrow()
   })
 
   it('"auto" resolves to BACKUP_SERVER_VERSION', () => {
