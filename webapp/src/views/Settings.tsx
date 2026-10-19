@@ -13,7 +13,7 @@ import {
   Spinner,
   Table
 } from 'reactstrap'
-import { api, formatBytes } from '../api'
+import { api, formatBytes, type CacheCandidate } from '../api'
 import { useApi } from '../useApi'
 
 function ContainerCard() {
@@ -271,12 +271,71 @@ function RowsTable(props: {
   )
 }
 
+// Directories the server found mostly rewritten in the last day. Exclude
+// queues the pattern; Save sends it with the rest of the list.
+function CacheSuggestions(props: {
+  candidates: CacheCandidate[]
+  queued: string[]
+  setQueued: (next: string[]) => void
+}) {
+  const { candidates, queued, setQueued } = props
+  if (candidates.length === 0) return null
+  return (
+    <Alert color="warning" className="mb-3">
+      <strong>Likely caches</strong>
+      <p className="small mb-2">
+        Most of what these directories hold was written in the last 24 hours. Each hourly backup
+        stores a new copy of what changed, so they take backup space and cloud upload for data the
+        plugin downloads or rebuilds anyway. Exclude them unless you need them restored.
+      </p>
+      <Table responsive size="sm" className="mb-0">
+        <thead>
+          <tr>
+            <th>Directory</th>
+            <th style={{ width: '7em' }}>Size</th>
+            <th style={{ width: '9em' }}>Written in 24 h</th>
+            <th style={{ width: '7em' }} />
+          </tr>
+        </thead>
+        <tbody>
+          {candidates.map((c) => {
+            const isQueued = queued.includes(c.path)
+            return (
+              <tr key={c.path}>
+                <td>
+                  <code className="small">{c.path.replace(/^plugin-config-data\//, '')}</code>
+                </td>
+                <td>{formatBytes(c.size)}</td>
+                <td>{formatBytes(c.recentBytes)}</td>
+                <td className="text-end">
+                  <Button
+                    size="sm"
+                    color={isQueued ? 'secondary' : 'warning'}
+                    outline={isQueued}
+                    onClick={() => {
+                      setQueued(isQueued ? queued.filter((p) => p !== c.path) : [...queued, c.path])
+                    }}
+                  >
+                    {isQueued ? 'Undo' : 'Exclude'}
+                  </Button>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </Table>
+    </Alert>
+  )
+}
+
 function ExclusionsCard() {
   const dirs = useApi(() => api.dataDirs())
   const pluginDirs = useApi(() => api.pluginDataDirs())
   const exclusions = useApi(() => api.exclusions())
+  const candidates = useApi(() => api.cacheCandidates())
 
   const [overrides, setOverrides] = useState<Record<string, boolean>>({})
+  const [queued, setQueued] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<number | null>(null)
@@ -285,6 +344,7 @@ function ExclusionsCard() {
   // or another client edited it).
   useEffect(() => {
     setOverrides({})
+    setQueued([])
   }, [exclusions.data, dirs.data, pluginDirs.data])
 
   // Three sections in the card. plugin-config-data is rendered as a
@@ -368,11 +428,16 @@ function ExclusionsCard() {
         if (isExcluded(fullName, p.excluded)) dirPatterns.push(fullName)
       }
 
-      const next = [...previousRawPatterns, ...dirPatterns]
+      const next = [
+        ...previousRawPatterns,
+        ...queued.filter((p) => !previousRawPatterns.includes(p)),
+        ...dirPatterns
+      ]
       await api.setExclusions(next)
       exclusions.refresh()
       dirs.refresh()
       pluginDirs.refresh()
+      candidates.refresh()
       setSavedAt(Date.now())
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -381,7 +446,7 @@ function ExclusionsCard() {
     }
   }
 
-  const dirty = Object.keys(overrides).length > 0
+  const dirty = Object.keys(overrides).length > 0 || queued.length > 0
 
   return (
     <Card className="mb-3">
@@ -400,8 +465,15 @@ function ExclusionsCard() {
             <p className="text-muted small mb-3">
               Uncheck a directory to exclude it from backups. Some plugin directories are
               locked-excluded by the server (live database state, our own kopia repo); see the note
-              next to each.
+              next to each. Saving applies from the next backup; existing backups keep what they
+              hold.
             </p>
+
+            <CacheSuggestions
+              candidates={candidates.data ?? []}
+              queued={queued}
+              setQueued={setQueued}
+            />
 
             <h6 className="mb-2">Top-level directories</h6>
             <RowsTable rows={topLevelDirs} isExcluded={isExcluded} toggle={toggle} />
@@ -449,6 +521,7 @@ function ExclusionsCard() {
                   disabled={saving}
                   onClick={() => {
                     setOverrides({})
+                    setQueued([])
                   }}
                 >
                   Discard changes
