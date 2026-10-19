@@ -270,7 +270,9 @@ describe('POST /api/update/apply', () => {
     app.savePluginOptions.mockImplementation((_o: unknown, cb: (e: Error | null) => void) => {
       cb(
         Object.assign(
-          new Error("ENOSPC: no space left on device, open '/home/x/signalk-backup.json'"),
+          new Error(
+            "ENOSPC: no space left on device, open '/srv/signalk/plugin-config-data/signalk-backup.json'"
+          ),
           {
             code: 'ENOSPC'
           }
@@ -285,8 +287,7 @@ describe('POST /api/update/apply', () => {
     expect(body(res).error).toBe(
       'Running 99.1.0, but saving it failed (disk full), so a plugin restart will go back. See the server log.'
     )
-    // The path stays in the log.
-    expect(app.error.mock.calls.some((c) => String(c[0]).includes('/home/x/'))).toBe(true)
+    expect(app.error.mock.calls.some((c) => String(c[0]).includes('/srv/signalk/'))).toBe(true)
   })
 
   it('rejects a malformed tag before touching the runtime', async () => {
