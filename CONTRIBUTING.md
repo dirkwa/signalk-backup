@@ -9,6 +9,14 @@ Before opening a pull request, run the full local chain:
 npm run format && npm run build:all
 ```
 
+## TypeScript only
+
+All code in this repository is TypeScript with `strict` on: the plugin, the
+webapp, tests, build scripts and tool configs. Please don't add JavaScript
+files (`.js`, `.mjs`, `.cjs`, `.jsx`); tool settings that are only data belong
+in JSON. Fix a type error rather than silencing it with `any`, `@ts-ignore` or
+a looser `tsconfig`.
+
 ## Keeping your branch up to date
 
 Rebase onto `main` rather than merging `main` into your branch. With

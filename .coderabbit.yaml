@@ -63,8 +63,14 @@ reviews:
 
         - `"type": "module"` — relative imports use the `.js` suffix
           (NodeNext). Do not suggest dropping it.
-        - tsconfig is strict. Avoid `any`. The webapp has its own
-          `tsconfig.webapp.json` because of the JSX/DOM types.
+        - **TypeScript only, under `strict`.** All code is TypeScript:
+          plugin, webapp, tests, build scripts and tool configs. Flag any
+          added or renamed `.js`, `.mjs`, `.cjs` or `.jsx` file outside build
+          output; settings that are only data belong in JSON.
+        - Flag `any`, `as any`, `@ts-ignore`, `@ts-nocheck`, and any change
+          that loosens a `tsconfig*.json` option; the fix is the type. The
+          webapp has its own `tsconfig.webapp.json` because of the JSX/DOM
+          types.
         - Node `>= 22.5.0`. Native fetch on the plugin side; browser fetch
           in the webapp.
         - React 19 + reactstrap. **Do not** suggest deprecated `FormEvent`
