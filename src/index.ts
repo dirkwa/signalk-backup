@@ -542,12 +542,20 @@ export default function (app: BackupServerAPI): Plugin {
     // Pin the result too, or the persisted short-circuit would undo this update next start.
     currentSettings.resolvedImageTag = resolvedTag
     resolvedAutoTag = resolvedTag
-    await new Promise<void>((resolve) => {
+    // Rejects so the route cannot report an update that the next restart undoes.
+    await new Promise<void>((resolve, reject) => {
       app.savePluginOptions({ ...currentSettings }, (err: NodeJS.ErrnoException | null) => {
         if (err) {
           app.error(
             `Failed to persist new tag: ${errMsg(err)}. Container is running with ${resolvedTag} but a plugin restart will revert.`
           )
+          reject(
+            new Error(
+              `Running ${resolvedTag}, but saving it failed, so a plugin restart will go back`,
+              { cause: err }
+            )
+          )
+          return
         }
         resolve()
       })

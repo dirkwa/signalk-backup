@@ -43,7 +43,7 @@ function makeApp(dataDir: string) {
     error: vi.fn(),
     setPluginStatus: vi.fn(),
     setPluginError: vi.fn(),
-    savePluginOptions: vi.fn((_o: unknown, cb: (e: null) => void) => {
+    savePluginOptions: vi.fn((_o: unknown, cb: (e: Error | null) => void) => {
       cb(null)
     }),
     getDataDirPath: () => dataDir,
@@ -222,9 +222,10 @@ describe('POST /api/update/apply', () => {
       },
       () => undefined
     )
-    await until(() =>
+    const ready = await until(() =>
       app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('Backup engine ready'))
     )
+    expect(ready).toBe(true)
 
     const res = await request(server).post('/api/update/apply').send({})
     await plugin.stop()
@@ -236,6 +237,47 @@ describe('POST /api/update/apply', () => {
       { imageTag?: string; resolvedImageTag?: string } | undefined
     expect(saved?.imageTag).toBe('auto')
     expect(saved?.resolvedImageTag).toBe('99.1.0')
+  })
+
+  it('fails the apply when the new version cannot be saved', async () => {
+    // The container already runs the new version, but a restart would go back,
+    // so the card must not report success.
+    const address = await listenHealthy()
+    installManager({
+      checkOne: () =>
+        Promise.resolve({
+          updateAvailable: true,
+          latestVersion: '99.1.0',
+          reason: 'newer-version'
+        }),
+      resolveContainerAddress: () => Promise.resolve(address)
+    })
+    const { server, app, plugin } = await mountPlugin()
+    plugin.start(
+      {
+        managedContainer: true,
+        imageTag: 'auto',
+        resolvedImageTag: BACKUP_SERVER_VERSION,
+        externalUrl: '',
+        emitSignalKDeltas: false
+      },
+      () => undefined
+    )
+    const ready = await until(() =>
+      app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('Backup engine ready'))
+    )
+    expect(ready).toBe(true)
+    app.savePluginOptions.mockImplementation((_o: unknown, cb: (e: Error | null) => void) => {
+      cb(new Error('disk full'))
+    })
+
+    const res = await request(server).post('/api/update/apply').send({})
+    await plugin.stop()
+
+    expect(res.status).toBe(500)
+    expect(body(res).error).toBe(
+      'Running 99.1.0, but saving it failed, so a plugin restart will go back: disk full'
+    )
   })
 
   it('rejects a malformed tag before touching the runtime', async () => {
