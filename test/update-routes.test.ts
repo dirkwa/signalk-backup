@@ -1,6 +1,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import express from 'express'
 import request from 'supertest'
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -12,6 +14,7 @@ import type { BackupServerAPI } from '../src/types.js'
 // unit tests, so three regressions shipped through it. Cover the contract here.
 
 const tempDirs: string[] = []
+const servers: http.Server[] = []
 
 /** supertest types `body` as `any`; narrow it once instead of per-assertion. */
 function body(res: { body: unknown }): { tag?: string; error?: string } {
@@ -20,6 +23,17 @@ function body(res: { body: unknown }): { tag?: string; error?: string } {
 
 afterEach(async () => {
   delete (globalThis as Record<string, unknown>)['__signalk_containerManager']
+  await Promise.all(
+    servers.splice(0).map(
+      (s) =>
+        new Promise<void>((resolve) => {
+          s.closeAllConnections()
+          s.close(() => {
+            resolve()
+          })
+        })
+    )
+  )
   await Promise.all(tempDirs.splice(0).map((d) => rm(d, { recursive: true, force: true })))
 })
 
@@ -29,7 +43,7 @@ function makeApp(dataDir: string) {
     error: vi.fn(),
     setPluginStatus: vi.fn(),
     setPluginError: vi.fn(),
-    savePluginOptions: vi.fn((_o: unknown, cb: (e: null) => void) => {
+    savePluginOptions: vi.fn((_o: unknown, cb: (e: Error | null) => void) => {
       cb(null)
     }),
     getDataDirPath: () => dataDir,
@@ -39,15 +53,17 @@ function makeApp(dataDir: string) {
 
 interface ManagerOverrides {
   checkOne?: () => Promise<unknown>
-  recreate?: () => Promise<void>
+  ensureRunning?: (name: string, config: unknown) => Promise<void>
+  recreate?: (name: string, config: unknown) => Promise<void>
   listContainers?: () => Promise<unknown[]>
+  resolveContainerAddress?: () => Promise<string>
 }
 
 function installManager(overrides: ManagerOverrides = {}) {
   const manager = {
     getRuntime: () => ({ runtime: 'podman', version: '5.4.2' }),
     whenReady: () => Promise.resolve(),
-    ensureRunning: () => Promise.resolve(),
+    ensureRunning: overrides.ensureRunning ?? (() => Promise.resolve()),
     recreate: overrides.recreate ?? (() => Promise.resolve()),
     stop: () => Promise.resolve(),
     remove: () => Promise.resolve(),
@@ -67,7 +83,8 @@ function installManager(overrides: ManagerOverrides = {}) {
         ])),
     // Port 1 never listens: a dev box running a real backup-server on 3010
     // would otherwise satisfy a readiness probe this suite must never depend on.
-    resolveContainerAddress: () => Promise.resolve('127.0.0.1:1'),
+    resolveContainerAddress:
+      overrides.resolveContainerAddress ?? (() => Promise.resolve('127.0.0.1:1')),
     updates: {
       register: vi.fn(),
       unregister: vi.fn(),
@@ -77,6 +94,32 @@ function installManager(overrides: ManagerOverrides = {}) {
   }
   ;(globalThis as Record<string, unknown>)['__signalk_containerManager'] = manager
   return manager
+}
+
+/** A stand-in backup server that passes the readiness probe; returns host:port. */
+function listenHealthy(): Promise<string> {
+  const server = http.createServer((req, res) => {
+    res.writeHead(req.url?.startsWith('/api/health') ? 200 : 404, {
+      'content-type': 'application/json'
+    })
+    res.end('{}')
+  })
+  servers.push(server)
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as AddressInfo
+      resolve(`127.0.0.1:${port}`)
+    })
+  })
+}
+
+async function until(predicate: () => boolean, budgetMs = 4000): Promise<boolean> {
+  const deadline = Date.now() + budgetMs
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await new Promise((r) => setTimeout(r, 25))
+  }
+  return predicate()
 }
 
 /** Mounts the plugin's real router so requests exercise the wire contract. */
@@ -148,6 +191,105 @@ describe('POST /api/update/apply', () => {
     expect(tag !== undefined && isConcreteSemver(tag)).toBe(true)
   })
 
+  it('installs the release the check reported under "auto", and keeps "auto"', async () => {
+    // The card's "Update to X" must land on X. Re-applying the tag the
+    // container last started installed nothing and pinned the running version.
+    const address = await listenHealthy()
+    const tags: string[] = []
+    const capture = (_n: string, c: unknown) => {
+      tags.push((c as { tag: string }).tag)
+      return Promise.resolve()
+    }
+    installManager({
+      checkOne: () =>
+        Promise.resolve({
+          updateAvailable: true,
+          latestVersion: '99.1.0',
+          reason: 'newer-version'
+        }),
+      ensureRunning: capture,
+      recreate: capture,
+      resolveContainerAddress: () => Promise.resolve(address)
+    })
+    const { server, app, plugin } = await mountPlugin()
+    plugin.start(
+      {
+        managedContainer: true,
+        imageTag: 'auto',
+        resolvedImageTag: BACKUP_SERVER_VERSION,
+        externalUrl: '',
+        emitSignalKDeltas: false
+      },
+      () => undefined
+    )
+    const ready = await until(() =>
+      app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('Backup engine ready'))
+    )
+    expect(ready).toBe(true)
+
+    const res = await request(server).post('/api/update/apply').send({})
+    await plugin.stop()
+
+    expect(res.status).toBe(200)
+    expect(body(res).tag).toBe('99.1.0')
+    expect(tags.at(-1)).toBe('99.1.0')
+    const saved = app.savePluginOptions.mock.calls.at(-1)?.[0] as
+      { imageTag?: string; resolvedImageTag?: string } | undefined
+    expect(saved?.imageTag).toBe('auto')
+    expect(saved?.resolvedImageTag).toBe('99.1.0')
+  })
+
+  it('fails the apply when the new version cannot be saved', async () => {
+    // The container already runs the new version, but a restart would go back,
+    // so the card must not report success.
+    const address = await listenHealthy()
+    installManager({
+      checkOne: () =>
+        Promise.resolve({
+          updateAvailable: true,
+          latestVersion: '99.1.0',
+          reason: 'newer-version'
+        }),
+      resolveContainerAddress: () => Promise.resolve(address)
+    })
+    const { server, app, plugin } = await mountPlugin()
+    plugin.start(
+      {
+        managedContainer: true,
+        imageTag: 'auto',
+        resolvedImageTag: BACKUP_SERVER_VERSION,
+        externalUrl: '',
+        emitSignalKDeltas: false
+      },
+      () => undefined
+    )
+    const ready = await until(() =>
+      app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('Backup engine ready'))
+    )
+    expect(ready).toBe(true)
+    app.savePluginOptions.mockImplementation((_o: unknown, cb: (e: Error | null) => void) => {
+      cb(
+        Object.assign(
+          new Error(
+            "ENOSPC: no space left on device, open '/srv/signalk/plugin-config-data/signalk-backup.json'"
+          ),
+          {
+            code: 'ENOSPC'
+          }
+        )
+      )
+    })
+
+    const res = await request(server).post('/api/update/apply').send({})
+    await plugin.stop()
+
+    expect(res.status).toBe(500)
+    expect(body(res).error).toBe(
+      'Running 99.1.0, but saving it failed (disk full), so a plugin restart will go back. See the server log.'
+    )
+    expect(app.error.mock.calls.some((c) => String(c[0]).includes('/srv/signalk/'))).toBe(true)
+  })
+
   it('rejects a malformed tag before touching the runtime', async () => {
     const recreate = vi.fn(() => Promise.resolve())
     installManager({ recreate })
@@ -166,6 +308,40 @@ describe('POST /api/update/apply', () => {
 
     expect(res.status).toBe(503)
     expect(body(res).error).toMatch(/signalk-container/i)
+  })
+})
+
+describe('"auto" image tag', () => {
+  it('starts the version it resolved, not the floor', async () => {
+    // The helper calls resolveTag with the requested tag alone, so a mapping
+    // that does not close over the resolved version always lands on the floor.
+    let seen!: (tag: string) => void
+    const started = new Promise<string>((resolve) => {
+      seen = resolve
+    })
+    const capture = (_n: string, c: unknown) => {
+      seen((c as { tag: string }).tag)
+      return Promise.resolve()
+    }
+    installManager({ ensureRunning: capture, recreate: capture })
+
+    const { plugin } = await mountPlugin()
+    // A persisted tag at or above the floor is reused without a lookup.
+    plugin.start(
+      {
+        managedContainer: true,
+        imageTag: 'auto',
+        resolvedImageTag: '99.0.0',
+        externalUrl: '',
+        emitSignalKDeltas: false
+      },
+      () => undefined
+    )
+    const tag = await started
+    await plugin.stop()
+
+    expect(BACKUP_SERVER_VERSION).not.toBe('99.0.0')
+    expect(tag).toBe('99.0.0')
   })
 })
 

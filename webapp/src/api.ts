@@ -723,7 +723,7 @@ export const api = {
     }),
   resetPassword: () => request<{ reset: boolean }>('/backups/password', { method: 'DELETE' }),
 
-  // Update check/apply are served by the plugin itself (ManagedContainer.registerUpdateRoutes),
+  // Update check/apply are served by the plugin itself (src/index.ts),
   // not proxied to backup-server, and answer with bare JSON rather than the { success, data }
   // envelope — including on failure, where they send a bare { error: string } that `request`
   // would flatten to "HTTP 503". Without signalk-container both return 503, which is the state
