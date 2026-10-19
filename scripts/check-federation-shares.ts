@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Build gate for the federated webapp: the remote must not carry its own React.
  *
@@ -33,7 +32,7 @@ const REACT_INTERNALS = 'react.transitional.element'
 // @module-federation has already renamed once, that is a property of the code.
 const REACT_RUNTIME = 'useState'
 
-function fail(msg) {
+function fail(msg: string): never {
   console.error(`\n✖ check-federation-shares: ${msg}\n`)
   process.exit(1)
 }
@@ -41,7 +40,7 @@ function fail(msg) {
 if (!existsSync(join(publicDir, 'remoteEntry.js')))
   fail('public/remoteEntry.js not found — run vite build first')
 
-function jsFiles(dir) {
+function jsFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const p = join(dir, e.name)
     if (e.isDirectory()) return jsFiles(p)

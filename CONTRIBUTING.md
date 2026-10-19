@@ -3,7 +3,8 @@
 Bug reports, feature requests and pull requests are welcome at
 <https://github.com/dirkwa/signalk-backup>.
 
-Before opening a pull request, run the full local chain:
+Before opening a pull request, run the full local chain. It needs Node 22.18 or
+later, which runs the TypeScript build scripts directly:
 
 ```bash
 npm run format && npm run build:all

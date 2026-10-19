@@ -7,6 +7,8 @@
   "include": [
     "src/**/*.ts",
     "test/**/*.ts",
+    "scripts/**/*.ts",
+    "*.config.ts",
     "webapp/src/components/cloud-sync-progress-display.ts"
   ],
   "exclude": ["node_modules", "plugin"]
