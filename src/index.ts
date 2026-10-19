@@ -31,7 +31,7 @@ import { resolveAutoTag } from './config/resolve-auto-tag.js'
 import { installServerVersion, pickServerUpdate } from './server-update.js'
 import { runAllExports } from './database-export/index.js'
 import { registerStagingRoutes } from './database-export/staging-routes.js'
-import { registerHostRestoreRoutes } from './restore-host-write.js'
+import { isHostRestoreRunning, registerHostRestoreRoutes } from './restore-host-write.js'
 import { startSignalKEmitter, stopSignalKEmitter } from './signalk-deltas.js'
 import { resolveSignalkBaseUrl as resolveBaseUrl } from './signalk-base-url.js'
 import { errMsg } from './errors.js'
@@ -344,6 +344,10 @@ export default function (app: BackupServerAPI): Plugin {
           res.status(400).json({ error: `Invalid tag: ${JSON.stringify(requested)}` })
           return
         }
+        if (serverInstalling) {
+          res.status(409).json({ error: 'A backup server update is already running.' })
+          return
+        }
         try {
           const tag = await applyServerUpdate(requested)
           res.json({ success: true, tag })
@@ -527,18 +531,34 @@ export default function (app: BackupServerAPI): Plugin {
 
   // "auto" moves to the release the update check reported; any other tag is re-applied as configured.
   async function applyServerUpdate(requested: string): Promise<string> {
-    if (requested === 'auto') {
-      const check = await container.checkForUpdate()
-      const latest = check?.updateAvailable ? check.latestVersion : null
-      if (latest && isConcreteSemver(latest)) {
-        await pullServerImage(latest)
-        await installServerRelease(latest, lifecycleGeneration)
-        return latest
+    const tag = await exclusively(async () => {
+      if (requested === 'auto') {
+        const check = await container.checkForUpdate()
+        const latest = check?.updateAvailable ? check.latestVersion : null
+        if (latest && isConcreteSemver(latest)) {
+          await pullServerImage(latest)
+          await installServerRelease(latest, lifecycleGeneration)
+          return latest
+        }
       }
-    }
-    const { tag } = await container.applyUpdate(requested)
-    await persistAppliedTag(requested, tag)
+      const applied = await container.applyUpdate(requested)
+      await persistAppliedTag(requested, applied.tag)
+      return applied.tag
+    })
+    // The apply saved imageTag without a restart: a pinned tag stops the updater, "auto" re-arms it.
+    if (client) scheduleServerUpdate(lifecycleGeneration, SERVER_UPDATE_INTERVAL_MS)
     return tag
+  }
+
+  // "Apply update" and the automatic updater both swap the container, so only one runs at a time.
+  async function exclusively<T>(work: () => Promise<T>): Promise<T> {
+    if (serverInstalling) throw new Error('A backup server update is already running.')
+    serverInstalling = true
+    try {
+      return await work()
+    } finally {
+      serverInstalling = false
+    }
   }
 
   // signalk-container's recreate removes the old container before it pulls,
@@ -551,8 +571,6 @@ export default function (app: BackupServerAPI): Plugin {
 
   // Moves "auto" to `target`, whose image must already be pulled; rolls back if it does not start.
   async function installServerRelease(target: string, gen: number): Promise<void> {
-    if (serverInstalling) throw new Error('a backup server update is already running')
-    serverInstalling = true
     const previous = resolvedAutoTag ?? BACKUP_SERVER_VERSION
     try {
       await installServerVersion(target, previous, {
@@ -571,8 +589,6 @@ export default function (app: BackupServerAPI): Plugin {
     } catch (err) {
       failedServerVersions.add(target)
       throw err
-    } finally {
-      serverInstalling = false
     }
     await persistAppliedTag('auto', target)
     app.setPluginStatus(`Backup server updated to ${target}`)
@@ -587,9 +603,13 @@ export default function (app: BackupServerAPI): Plugin {
     startSignalKEmitter(app, address, { emitSignalKDeltas: currentSettings.emitSignalKDeltas })
   }
 
+  function autoUpdateEnabled(): boolean {
+    return currentSettings?.imageTag === 'auto' && currentSettings.autoUpdateServer
+  }
+
   function scheduleServerUpdate(gen: number, delayMs: number): void {
     stopServerUpdateTimer()
-    if (currentSettings?.imageTag !== 'auto' || !currentSettings.autoUpdateServer) return
+    if (!autoUpdateEnabled()) return
     serverUpdateTimer = setTimeout(() => {
       serverUpdateTimer = null
       void checkServerUpdate(gen).then((nextMs) => {
@@ -609,26 +629,32 @@ export default function (app: BackupServerAPI): Plugin {
   // or failing a download is routine on a boat and only logged; an install
   // that had to roll back is reported as a plugin error.
   async function checkServerUpdate(gen: number): Promise<number> {
+    // Checked again after every await: "Apply update" with a pinned tag saves
+    // it without a restart, so the generation alone does not catch it.
+    const wanted = () => gen === lifecycleGeneration && autoUpdateEnabled()
+    const busy = () => serverInstalling || isHostRestoreRunning()
     let target: string | null
     try {
-      const current = resolvedAutoTag
+      if (!wanted()) return SERVER_UPDATE_INTERVAL_MS
       const check = await container.checkForUpdate()
+      const current = resolvedAutoTag
       // An offline result is the cached one, and its download would fail.
       if (!current || !check || check.reason === 'offline') return SERVER_UPDATE_INTERVAL_MS
       target = pickServerUpdate(current, check.latestVersion, failedServerVersions)
-      if (!target || gen !== lifecycleGeneration) return SERVER_UPDATE_INTERVAL_MS
+      if (!target || !wanted()) return SERVER_UPDATE_INTERVAL_MS
       await pullServerImage(target)
     } catch (err) {
       app.debug(`Backup server update check failed: ${errMsg(err)}`)
       return SERVER_UPDATE_INTERVAL_MS
     }
-    if (serverInstalling || !(await client?.isIdle())) {
+    if (!wanted()) return SERVER_UPDATE_INTERVAL_MS
+    if (busy() || !(await client?.isIdle()) || busy()) {
       app.debug(`Backup server ${target} is downloaded; installing once no restore is running`)
       return SERVER_UPDATE_BUSY_RETRY_MS
     }
-    if (gen !== lifecycleGeneration) return SERVER_UPDATE_INTERVAL_MS
+    if (!wanted()) return SERVER_UPDATE_INTERVAL_MS
     try {
-      await installServerRelease(target, gen)
+      await exclusively(() => installServerRelease(target, gen))
     } catch (err) {
       if (gen === lifecycleGeneration) {
         app.setPluginError(`Automatic backup server update failed: ${errMsg(err)}`)

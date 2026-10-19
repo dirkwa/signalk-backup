@@ -13,6 +13,13 @@ import type { BackupServerAPI } from '../src/types.js'
 // The webapp's container card is the only consumer of these routes and has no
 // unit tests, so three regressions shipped through it. Cover the contract here.
 
+// A host restore runs in the plugin; this stands in for one without driving its routes.
+const hostRestore = vi.hoisted(() => ({ running: false }))
+vi.mock('../src/restore-host-write.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/restore-host-write.js')>()),
+  isHostRestoreRunning: () => hostRestore.running
+}))
+
 const tempDirs: string[] = []
 const servers: http.Server[] = []
 
@@ -425,11 +432,13 @@ describe('automatic server update', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    hostRestore.running = false
   })
 
   async function startAuto(
     autoUpdateServer: boolean,
-    reason: 'newer-version' | 'offline' = 'newer-version'
+    reason: 'newer-version' | 'offline' = 'newer-version',
+    pull: () => Promise<void> = () => Promise.resolve()
   ) {
     const address = await listenBackupServer()
     const events: string[] = []
@@ -448,11 +457,11 @@ describe('automatic server update', () => {
       recreate: capture,
       pullImage: (image) => {
         events.push(`pull ${image}`)
-        return Promise.resolve()
+        return pull()
       },
       resolveContainerAddress: () => Promise.resolve(address)
     })
-    const { app, plugin } = await mountPlugin()
+    const { server, app, plugin } = await mountPlugin()
     plugin.start(
       {
         managedContainer: true,
@@ -467,7 +476,7 @@ describe('automatic server update', () => {
     await until(() =>
       app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('Backup engine ready'))
     )
-    return { app, plugin, events }
+    return { server, app, plugin, events }
   }
 
   it('installs a newer release on its own, without a click', async () => {
@@ -502,6 +511,70 @@ describe('automatic server update', () => {
 
     expect(events.filter((e) => e.startsWith('pull'))).toEqual([])
     expect(app.setPluginError).not.toHaveBeenCalled()
+  })
+
+  it('stops once "Apply update" pins a version', async () => {
+    // The apply saves imageTag without a restart, so the generation does not change.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { server, app, plugin, events } = await startAuto(true)
+
+    const res = await request(server).post('/api/update/apply').send({ tag: BACKUP_SERVER_VERSION })
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000)
+    await plugin.stop()
+
+    expect(res.status).toBe(200)
+    expect(events.filter((e) => e.startsWith('pull'))).toEqual([])
+    const saved = app.savePluginOptions.mock.calls.at(-1)?.[0] as { imageTag?: string } | undefined
+    expect(saved?.imageTag).toBe(BACKUP_SERVER_VERSION)
+  })
+
+  it('waits for a host restore before swapping', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    hostRestore.running = true
+    const { app, plugin, events } = await startAuto(true)
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    const deferred = await until(() =>
+      app.debug.mock.calls.some((c) => String(c[0]).includes('once no restore is running'))
+    )
+    expect(deferred).toBe(true)
+    expect(events).not.toContain(`run ${NEXT}`)
+
+    hostRestore.running = false
+    await vi.advanceTimersByTimeAsync(15 * 60_000)
+    await until(() =>
+      app.setPluginStatus.mock.calls.some((c) => c[0] === `Backup server updated to ${NEXT}`)
+    )
+    await plugin.stop()
+
+    expect(events.at(-1)).toBe(`run ${NEXT}`)
+  })
+
+  it('refuses a second apply while one is running', async () => {
+    let pullStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      pullStarted = resolve
+    })
+    let finishPull!: () => void
+    const { server, plugin } = await startAuto(false, 'newer-version', () => {
+      pullStarted()
+      return new Promise<void>((resolve) => {
+        finishPull = resolve
+      })
+    })
+
+    const first = request(server)
+      .post('/api/update/apply')
+      .send({})
+      .then((r) => r)
+    await started
+    const second = await request(server).post('/api/update/apply').send({})
+    finishPull()
+    const firstRes = await first
+    await plugin.stop()
+
+    expect(second.status).toBe(409)
+    expect(firstRes.status).toBe(200)
   })
 
   it('downloads nothing when automatic updates are off', async () => {
