@@ -294,7 +294,9 @@ function CacheSuggestions(props: {
             <th>Directory</th>
             <th style={{ width: '7em' }}>Size</th>
             <th style={{ width: '9em' }}>Written in 24 h</th>
-            <th style={{ width: '7em' }} />
+            <th className="text-end" style={{ width: '7em' }}>
+              Actions
+            </th>
           </tr>
         </thead>
         <tbody>
