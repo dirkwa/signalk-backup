@@ -549,10 +549,12 @@ export default function (app: BackupServerAPI): Plugin {
           app.error(
             `Failed to persist new tag: ${errMsg(err)}. Container is running with ${resolvedTag} but a plugin restart will revert.`
           )
+          // The full error stays in the log above: its message can name internal
+          // paths. The errno code alone says what to fix without them.
+          const reason = saveFailureReason(err)
           reject(
             new Error(
-              `Running ${resolvedTag}, but saving it failed, so a plugin restart will go back`,
-              { cause: err }
+              `Running ${resolvedTag}, but saving it failed${reason ? ` (${reason})` : ''}, so a plugin restart will go back. See the server log.`
             )
           )
           return
@@ -844,6 +846,17 @@ export default function (app: BackupServerAPI): Plugin {
   }
 
   return plugin
+}
+
+const SAVE_FAILURE_REASONS: Readonly<Record<string, string>> = {
+  ENOSPC: 'disk full',
+  EACCES: 'permission denied',
+  EPERM: 'permission denied',
+  EROFS: 'read-only file system'
+}
+
+function saveFailureReason(err: NodeJS.ErrnoException): string | undefined {
+  return err.code ? (SAVE_FAILURE_REASONS[err.code] ?? err.code) : undefined
 }
 
 /**
