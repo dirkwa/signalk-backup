@@ -550,6 +550,37 @@ describe('automatic server update', () => {
     expect(events.at(-1)).toBe(`run ${NEXT}`)
   })
 
+  it('does not swap again when "Apply update" installed the release mid-download', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let firstPullStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      firstPullStarted = resolve
+    })
+    let finishFirstPull!: () => void
+    let pulls = 0
+    const { server, app, plugin, events } = await startAuto(true, 'newer-version', () => {
+      pulls++
+      if (pulls > 1) return Promise.resolve()
+      firstPullStarted()
+      return new Promise<void>((resolve) => {
+        finishFirstPull = resolve
+      })
+    })
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    await started
+    const res = await request(server).post('/api/update/apply').send({})
+    finishFirstPull()
+    const skipped = await until(() =>
+      app.debug.mock.calls.some((c) => String(c[0]).includes('is no longer an update'))
+    )
+    await plugin.stop()
+
+    expect(res.status).toBe(200)
+    expect(skipped).toBe(true)
+    expect(events.filter((e) => e === `run ${NEXT}`)).toHaveLength(1)
+  })
+
   it('refuses a second apply while one is running', async () => {
     let pullStarted!: () => void
     const started = new Promise<void>((resolve) => {

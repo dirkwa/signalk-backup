@@ -653,6 +653,12 @@ export default function (app: BackupServerAPI): Plugin {
       return SERVER_UPDATE_BUSY_RETRY_MS
     }
     if (!wanted()) return SERVER_UPDATE_INTERVAL_MS
+    // "Apply update" may have installed this release, or a newer one, during the pull.
+    const current = resolvedAutoTag
+    if (!current || pickServerUpdate(current, target, failedServerVersions) !== target) {
+      app.debug(`Backup server ${target} is no longer an update for ${current ?? 'this install'}`)
+      return SERVER_UPDATE_INTERVAL_MS
+    }
     try {
       await exclusively(() => installServerRelease(target, gen))
     } catch (err) {
