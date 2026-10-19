@@ -5,6 +5,7 @@ import { Request, Response, IRouter } from 'express'
 import {
   ManagedContainer,
   getContainerManager,
+  isValidImageTag,
   retryForever,
   startSafely,
   waitForContainerManager
@@ -20,7 +21,12 @@ import {
   VolumeIssue
 } from './types.js'
 import { ConfigSchema, Config, SCHEMA_DEFAULTS } from './config/schema.js'
-import { BACKUP_SERVER_REPO, BACKUP_SERVER_VERSION, resolveImageTag } from './config/image-tag.js'
+import {
+  BACKUP_SERVER_REPO,
+  BACKUP_SERVER_VERSION,
+  isConcreteSemver,
+  resolveImageTag
+} from './config/image-tag.js'
 import { resolveAutoTag } from './config/resolve-auto-tag.js'
 import { runAllExports } from './database-export/index.js'
 import { registerStagingRoutes } from './database-export/staging-routes.js'
@@ -169,8 +175,10 @@ export default function (app: BackupServerAPI): Plugin {
     image: BACKUP_IMAGE,
     buildConfig: buildContainerConfig,
     defaultTag: SCHEMA_DEFAULTS.imageTag,
-    // Maps "auto" to a concrete version; every other tag passes through.
-    resolveTag: resolveImageTag,
+    // Maps "auto" to the version asyncStart resolved; every other tag passes through.
+    // A closure, not resolveImageTag itself: the helper passes the requested tag alone,
+    // which always resolved "auto" to the floor.
+    resolveTag: (tag) => resolveImageTag(tag, resolvedAutoTag),
     managerTimeoutMs: 120_000,
     readiness: {
       port: API_PORT,
@@ -288,34 +296,45 @@ export default function (app: BackupServerAPI): Plugin {
         })
       })
 
-      // Update detection — delegated to signalk-container's centralized
-      // update service. Mounts GET /api/update/check and POST
-      // /api/update/apply — the same paths the webapp already calls.
-      container.registerUpdateRoutes(router, {
-        onApplied: async (requestedTag, resolvedTag) => {
-          // Persist requestedTag not resolved tag: saving "auto" preserves auto-tracking across upgrades.
-          if (!currentSettings) {
-            // Both dropped-persistence paths log: silently skipping would let
-            // a restart revert the update with nothing in the log to explain it.
-            app.error(
-              `Updated to ${resolvedTag} but could not persist "${requestedTag}": plugin settings not loaded. A plugin restart will revert.`
-            )
+      // GET /api/update/check and POST /api/update/apply, the paths the
+      // webapp's container card calls. Detection is signalk-container's update
+      // service. Not the helper's registerUpdateRoutes: its apply re-applies the
+      // tag the container last started, which under "auto" is the running
+      // version, so it installed nothing and then pinned that version.
+      router.get('/api/update/check', async (_req: Request, res: Response) => {
+        try {
+          const result = await container.checkForUpdate()
+          if (!result) {
+            res.status(503).json({ error: 'signalk-container not available' })
             return
           }
-          currentSettings.imageTag = requestedTag
-          // Pin the result too, or the persisted short-circuit would undo this update next start.
-          currentSettings.resolvedImageTag = resolvedTag
-          resolvedAutoTag = resolvedTag
-          await new Promise<void>((resolve) => {
-            app.savePluginOptions({ ...currentSettings }, (err: NodeJS.ErrnoException | null) => {
-              if (err) {
-                app.error(
-                  `Failed to persist new tag: ${errMsg(err)}. Container is running with ${resolvedTag} but a plugin restart will revert.`
-                )
-              }
-              resolve()
-            })
-          })
+          res.json(result)
+        } catch (err) {
+          res.status(500).json({ error: errMsg(err) })
+        }
+      })
+
+      router.post('/api/update/apply', async (req: Request, res: Response) => {
+        if (!getContainerManager()) {
+          res.status(503).json({ error: 'signalk-container not available' })
+          return
+        }
+        const body = req.body as { tag?: unknown } | undefined
+        const requested =
+          typeof body?.tag === 'string' && body.tag.length > 0
+            ? body.tag
+            : (currentSettings?.imageTag ?? SCHEMA_DEFAULTS.imageTag)
+        if (!isValidImageTag(requested)) {
+          res.status(400).json({ error: `Invalid tag: ${JSON.stringify(requested)}` })
+          return
+        }
+        try {
+          const tag = await applyServerUpdate(requested)
+          res.json({ success: true, tag })
+        } catch (err) {
+          const msg = errMsg(err)
+          app.setPluginError(`Update failed: ${msg}`)
+          res.status(500).json({ error: msg })
         }
       })
 
@@ -488,6 +507,51 @@ export default function (app: BackupServerAPI): Plugin {
         }
       })
     }
+  }
+
+  // "auto" moves to the release the update check reported; any other tag is re-applied as configured.
+  async function applyServerUpdate(requested: string): Promise<string> {
+    const previous = resolvedAutoTag
+    if (requested === 'auto') {
+      const check = await container.checkForUpdate()
+      const latest = check?.updateAvailable ? check.latestVersion : null
+      if (latest && isConcreteSemver(latest)) resolvedAutoTag = latest
+    }
+    let tag: string
+    try {
+      ;({ tag } = await container.applyUpdate(requested))
+    } catch (err) {
+      resolvedAutoTag = previous
+      throw err
+    }
+    await persistAppliedTag(requested, tag)
+    return tag
+  }
+
+  async function persistAppliedTag(requestedTag: string, resolvedTag: string): Promise<void> {
+    // Persist requestedTag not resolved tag: saving "auto" preserves auto-tracking across upgrades.
+    if (!currentSettings) {
+      // Both dropped-persistence paths log: silently skipping would let
+      // a restart revert the update with nothing in the log to explain it.
+      app.error(
+        `Updated to ${resolvedTag} but could not persist "${requestedTag}": plugin settings not loaded. A plugin restart will revert.`
+      )
+      return
+    }
+    currentSettings.imageTag = requestedTag
+    // Pin the result too, or the persisted short-circuit would undo this update next start.
+    currentSettings.resolvedImageTag = resolvedTag
+    resolvedAutoTag = resolvedTag
+    await new Promise<void>((resolve) => {
+      app.savePluginOptions({ ...currentSettings }, (err: NodeJS.ErrnoException | null) => {
+        if (err) {
+          app.error(
+            `Failed to persist new tag: ${errMsg(err)}. Container is running with ${resolvedTag} but a plugin restart will revert.`
+          )
+        }
+        resolve()
+      })
+    })
   }
 
   // Lets the next start short-circuit without a lookup; a failed save costs a lookup, never startup.
