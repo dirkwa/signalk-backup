@@ -314,12 +314,12 @@ export interface PluginDataDirEntry {
   lockReason?: string
 }
 
-/** A plugin subdirectory the server suggests excluding: big, and mostly written in the last 24 h. */
+/** A plugin subdirectory the server suggests excluding: big, and mostly in files modified in the last 24 h. */
 export interface CacheCandidate {
   /** Exclusion pattern for the directory, relative to the Signal K data directory. */
   path: string
   size: number
-  /** Bytes in files written in the last 24 hours. */
+  /** Bytes in files modified in the last 24 hours, each counted in full. */
   recentBytes: number
 }
 

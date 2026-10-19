@@ -271,7 +271,7 @@ function RowsTable(props: {
   )
 }
 
-// Directories the server found mostly rewritten in the last day. Exclude
+// Directories mostly in files modified in the last day, as the server found them. Exclude
 // queues the pattern; Save sends it with the rest of the list.
 function CacheSuggestions(props: {
   candidates: CacheCandidate[]
@@ -284,16 +284,17 @@ function CacheSuggestions(props: {
     <Alert color="warning" className="mb-3">
       <strong>Likely caches</strong>
       <p className="small mb-2">
-        Most of what these directories hold was written in the last 24 hours. Each hourly backup
-        stores a new copy of what changed, so they take backup space and cloud upload for data the
-        plugin downloads or rebuilds anyway. Exclude them unless you need them restored.
+        Most of what these directories hold is in files changed in the last 24 hours. If the plugin
+        downloads or rebuilds them, each hourly backup stores a new copy, which costs backup space
+        and cloud upload for nothing. A growing log or database can show up here too, so exclude
+        only what you would not need restored.
       </p>
       <Table responsive size="sm" className="mb-0">
         <thead>
           <tr>
             <th>Directory</th>
             <th style={{ width: '7em' }}>Size</th>
-            <th style={{ width: '9em' }}>Written in 24 h</th>
+            <th style={{ width: '9em' }}>Changed in 24 h</th>
             <th className="text-end" style={{ width: '7em' }}>
               Actions
             </th>
