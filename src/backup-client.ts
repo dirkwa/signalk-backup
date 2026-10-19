@@ -10,6 +10,7 @@
  *   - getSettings()  — GET  /api/settings (read scheduler/cloud config)
  *   - putSettings()  — PUT  /api/settings (seed default schedule on first run)
  *   - getGuiUrl()    — GET  /api/gui-url (used by the redirect HTML's proxy)
+ *   - isIdle()       — no restore running (gates an automatic server update)
  *
  * The full API surface (backups list/create/restore, cloud sync, etc.) is
  * exercised by the container's own UI. The plugin doesn't need to wrap it.
@@ -29,6 +30,16 @@ export interface BackupServerSettings {
   excludes?: string[]
   [key: string]: unknown
 }
+
+// States in which no restore is running: the flow either never started or has ended.
+const SETTLED_RESTORE_STATES: ReadonlySet<string> = new Set([
+  'idle',
+  'completed',
+  'failed',
+  'rolled_back'
+])
+// "ready" is not settled: the user is choosing what to restore from the cloud.
+const SETTLED_CLOUD_RESTORE_PHASES: ReadonlySet<string> = new Set(['idle', 'failed'])
 
 export interface BackupServerHealth {
   status: string
@@ -135,6 +146,26 @@ export class BackupClient {
 
   async getGuiUrl(): Promise<{ url: string }> {
     return this.request<{ url: string }>('/api/gui-url')
+  }
+
+  // A server restart mid-restore leaves files half-written, so an unreadable
+  // status counts as busy. A running cloud sync does not: the next sync skips
+  // what was already uploaded.
+  async isIdle(): Promise<boolean> {
+    try {
+      const [full, partial, cloud] = await Promise.all([
+        this.request<{ state?: string }>('/api/backups/restore/status'),
+        this.request<{ state?: string }>('/api/backups/restore-partial/status'),
+        this.request<{ cloudPhase?: string }>('/api/cloud/restore/status')
+      ])
+      return (
+        SETTLED_RESTORE_STATES.has(full.state ?? '') &&
+        SETTLED_RESTORE_STATES.has(partial.state ?? '') &&
+        SETTLED_CLOUD_RESTORE_PHASES.has(cloud.cloudPhase ?? '')
+      )
+    } catch {
+      return false
+    }
   }
 
   get base(): string {

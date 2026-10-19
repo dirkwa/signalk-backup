@@ -61,6 +61,11 @@ class HostRestoreState {
 
 const state = new HostRestoreState()
 
+// A host restore streams from the backup-server, so replacing that container mid-restore breaks it.
+export function isHostRestoreRunning(): boolean {
+  return state.isRunning()
+}
+
 export function registerHostRestoreRoutes(router: IRouter, opts: RestoreHostWriteOptions): void {
   router.get('/api/restore-partial-host/status', (_req: Request, res: Response) => {
     res.json({

@@ -75,3 +75,55 @@ describe('BackupClient', () => {
     await expect(client.waitForReady(2_000, 50)).resolves.toBeUndefined()
   })
 })
+
+// The three restore flows a server restart would cut short, as the server reports them.
+function restoreServer(states: { full: string; partial: string; cloud: string } | 'fail') {
+  return listen((req, res) => {
+    if (states === 'fail') {
+      res.writeHead(500)
+      res.end()
+      return
+    }
+    const data = req.url?.startsWith('/api/backups/restore-partial/status')
+      ? { state: states.partial }
+      : req.url?.startsWith('/api/backups/restore/status')
+        ? { state: states.full }
+        : req.url?.startsWith('/api/cloud/restore/status')
+          ? { cloudPhase: states.cloud, restore: null }
+          : null
+    res.writeHead(data ? 200 : 404, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ success: true, data }))
+  })
+}
+
+describe('BackupClient.isIdle', () => {
+  it('is idle when no restore runs, including one that has ended', async () => {
+    const idle = await restoreServer({ full: 'idle', partial: 'idle', cloud: 'idle' })
+    expect(await new BackupClient(idle).isIdle()).toBe(true)
+    const ended = await restoreServer({
+      full: 'completed',
+      partial: 'rolled_back',
+      cloud: 'failed'
+    })
+    expect(await new BackupClient(ended).isIdle()).toBe(true)
+  })
+
+  it('is busy while any restore runs', async () => {
+    const full = await restoreServer({ full: 'extracting', partial: 'idle', cloud: 'idle' })
+    expect(await new BackupClient(full).isIdle()).toBe(false)
+    const partial = await restoreServer({
+      full: 'idle',
+      partial: 'safety_snapshotting',
+      cloud: 'idle'
+    })
+    expect(await new BackupClient(partial).isIdle()).toBe(false)
+    // "ready": the user is picking what to restore from the cloud.
+    const cloud = await restoreServer({ full: 'idle', partial: 'idle', cloud: 'ready' })
+    expect(await new BackupClient(cloud).isIdle()).toBe(false)
+  })
+
+  it('counts an unreadable status as busy', async () => {
+    const broken = await restoreServer('fail')
+    expect(await new BackupClient(broken).isIdle()).toBe(false)
+  })
+})
