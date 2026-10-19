@@ -38,7 +38,7 @@ jobs:
       # publishable so a malformed tag never produces a Release.
       - name: Validate tag is semver
         run: |
-          if [[ ! "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+          if [[ ! "$GITHUB_REF" =~ ^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Tag ${GITHUB_REF#refs/tags/} is not a valid semver vX.Y.Z[-prerelease][+build]"
             exit 1
           fi
@@ -78,12 +78,12 @@ jobs:
       contents: read
 
     steps:
-      # The release job above validates the tag too, but it only runs for a
-      # pre-release now — so a malformed stable tag would reach npm unchecked
-      # without this.
+      # The release job above validates the tag too, but it runs only for a
+      # tag pushed by hand, and only after this job, so without this check a
+      # malformed tag would reach npm unchecked.
       - name: Validate tag is semver
         run: |
-          if [[ ! "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+          if [[ ! "$GITHUB_REF" =~ ^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Tag ${GITHUB_REF#refs/tags/} is not a valid semver vX.Y.Z[-prerelease][+build]"
             exit 1
           fi
@@ -98,16 +98,26 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      # npm publish uses the checked-out package.json, not the tag — so a tag
-      # that names a different version would publish under the wrong one, and
-      # a stable tag would move `latest` to it.
-      - name: Tag matches package.json
+      # npm publish uses the checked-out package.json, not the tag. A release
+      # tag from release-please always equals it. A pre-release tag pushed by
+      # hand sits on a main whose package.json still holds the last release,
+      # so it takes the tag's version for this publish only. Any other
+      # mismatch would publish under the wrong version, and a stable one would
+      # move `latest` to it.
+      - name: Version from the tag
         run: |
           pkg=$(node -p "require('./package.json').version")
-          if [ "v$pkg" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match package.json $pkg"
-            exit 1
+          tagged="${GITHUB_REF_NAME#v}"
+          if [ "$tagged" = "$pkg" ]; then
+            exit 0
           fi
+          case "${tagged%%+*}" in
+            *-*) npm version "$tagged" --no-git-tag-version ;;
+            *)
+              echo "::error::Tag $GITHUB_REF_NAME does not match package.json $pkg"
+              exit 1
+              ;;
+          esac
 
       - run: npm install
 
