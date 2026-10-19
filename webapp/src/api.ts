@@ -314,6 +314,15 @@ export interface PluginDataDirEntry {
   lockReason?: string
 }
 
+/** A plugin subdirectory the server suggests excluding: big, and mostly in files modified in the last 24 h. */
+export interface CacheCandidate {
+  /** Exclusion pattern for the directory, relative to the Signal K data directory. */
+  path: string
+  size: number
+  /** Bytes in files modified in the last 24 hours, each counted in full. */
+  recentBytes: number
+}
+
 export interface RetentionConfig {
   /** Number of hourly backups to keep. */
   hourly: number
@@ -692,6 +701,12 @@ export const api = {
   // server-side rules.
   dataDirs: () => request<DataDirEntry[]>('/backups/data-dirs'),
   pluginDataDirs: () => request<PluginDataDirEntry[]>('/backups/plugin-data-dirs'),
+  // A backup-server older than the route answers 404: no suggestions then.
+  cacheCandidates: () =>
+    request<CacheCandidate[]>('/backups/cache-candidates').catch((err: unknown) => {
+      if (err instanceof ApiError && err.status === 404) return []
+      throw err
+    }),
 
   // Encryption password — kopia's repo password. Default is a known
   // string; once a user sets a custom one, hasCustomPassword goes true.
