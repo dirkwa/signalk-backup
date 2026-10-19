@@ -13,10 +13,10 @@ export const ConfigSchema = Type.Object({
     default: 'auto',
     title: 'Container image tag',
     description:
-      '"auto" (default) runs a concrete server version, so update notices read "1.0.0 → 1.0.1" ' +
-      'and nothing is downloaded until you take the update. It keeps the version it last ' +
-      'resolved and moves on only when a plugin update raises the floor, so boots need no ' +
-      'network. Pin a specific version (e.g. "1.0.1") to stay on it. "latest" also runs the ' +
+      '"auto" (default) runs a concrete server version, so update notices read "1.0.0 → 1.0.1". ' +
+      'It starts on the version it last resolved, so boots need no network, and moves to a new ' +
+      'release on its own when "Update the backup server automatically" is on, or when you ' +
+      'take the update. Pin a specific version (e.g. "1.0.1") to stay on it. "latest" also runs the ' +
       'newest image, but as a floating tag it is checked by downloading it — about 400MB per ' +
       'check, which matters on a metered link — and reports "image rebuild available" rather ' +
       'than a version.'
@@ -30,6 +30,16 @@ export const ConfigSchema = Type.Object({
     description:
       'Managed by the plugin: the concrete version "auto" resolved to. Set imageTag to something ' +
       'other than "auto" to pin a version; this field is not used then.'
+  }),
+  autoUpdateServer: Type.Boolean({
+    default: true,
+    title: 'Update the backup server automatically',
+    description:
+      'With image tag "auto", install new backup server releases of the same major version ' +
+      'without asking: the plugin checks every 6 hours, downloads the new image (about 430MB) ' +
+      'while the running server keeps working, and switches once no restore is running. If the ' +
+      'new version does not start, it goes back to the previous one. Turn this off on a metered ' +
+      'link; updates then wait for "Apply update" in the Backup app.'
   }),
   externalUrl: Type.String({
     default: '',
@@ -65,6 +75,7 @@ export const SCHEMA_DEFAULTS: Config = {
   managedContainer: true,
   imageTag: 'auto',
   resolvedImageTag: '',
+  autoUpdateServer: true,
   externalUrl: '',
   emitSignalKDeltas: true,
   databaseExport: {

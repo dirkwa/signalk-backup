@@ -28,6 +28,7 @@ import {
   resolveImageTag
 } from './config/image-tag.js'
 import { resolveAutoTag } from './config/resolve-auto-tag.js'
+import { installServerVersion, pickServerUpdate } from './server-update.js'
 import { runAllExports } from './database-export/index.js'
 import { registerStagingRoutes } from './database-export/staging-routes.js'
 import { registerHostRestoreRoutes } from './restore-host-write.js'
@@ -53,6 +54,14 @@ const HEALTH_PROBE = `const r=require('http').get('http://127.0.0.1:${API_PORT}/
 // Readiness-retry backoff (15s doubling to a 2min ceiling, forever): a transient boot race must not wedge the plugin until a human restarts it — on a boat that can be weeks later.
 const READY_RETRY_MIN_MS = 15_000
 const READY_RETRY_MAX_MS = 120_000
+
+// Automatic server updates. The first check waits out boot and the startup
+// backup; a server busy restoring is asked again well before the next check.
+const SERVER_UPDATE_FIRST_CHECK_MS = 5 * 60_000
+const SERVER_UPDATE_INTERVAL_MS = 6 * 60 * 60_000
+const SERVER_UPDATE_BUSY_RETRY_MS = 15 * 60_000
+// How long a recreated server gets to answer /api/health before it is rolled back.
+const SERVER_UPDATE_READY_MS = 3 * 60_000
 
 /**
  * Sensible default resource limits for the backup-server container.
@@ -95,6 +104,11 @@ export default function (app: BackupServerAPI): Plugin {
   let lifecycleGeneration = 0
   // Cancels in-flight container work on stop(); recreated per start().
   let startAbort: AbortController | null = null
+  let serverUpdateTimer: NodeJS.Timeout | null = null
+  // Releases that would not start; the automatic updater skips them until Signal K restarts.
+  const failedServerVersions = new Set<string>()
+  // One install at a time: "Apply update" and the automatic updater both swap the container.
+  let serverInstalling = false
 
   const buildContainerConfig = (tag: string): ContainerConfig => ({
     image: BACKUP_IMAGE,
@@ -238,6 +252,7 @@ export default function (app: BackupServerAPI): Plugin {
       // SignalK re-runs start() on a config save with no stop(), so keeping these reported the previous upstream's readiness while connecting to a new one.
       client = null
       containerAddress = null
+      stopServerUpdateTimer()
       // startSafely: SignalK does not await start(), and it demotes the
       // helper's `cancelled` error to debug so stopping mid-startup doesn't
       // leave "Startup failed: Operation cancelled" in the plugin error box.
@@ -254,6 +269,7 @@ export default function (app: BackupServerAPI): Plugin {
       startAbort = null
       stopSignalKEmitter()
       stopDbExportTimer()
+      stopServerUpdateTimer()
       shutdownSmbDiscovery()
       client = null
       containerAddress = null
@@ -511,21 +527,114 @@ export default function (app: BackupServerAPI): Plugin {
 
   // "auto" moves to the release the update check reported; any other tag is re-applied as configured.
   async function applyServerUpdate(requested: string): Promise<string> {
-    const previous = resolvedAutoTag
     if (requested === 'auto') {
       const check = await container.checkForUpdate()
       const latest = check?.updateAvailable ? check.latestVersion : null
-      if (latest && isConcreteSemver(latest)) resolvedAutoTag = latest
+      if (latest && isConcreteSemver(latest)) {
+        await pullServerImage(latest)
+        await installServerRelease(latest, lifecycleGeneration)
+        return latest
+      }
     }
-    let tag: string
-    try {
-      ;({ tag } = await container.applyUpdate(requested))
-    } catch (err) {
-      resolvedAutoTag = previous
-      throw err
-    }
+    const { tag } = await container.applyUpdate(requested)
     await persistAppliedTag(requested, tag)
     return tag
+  }
+
+  // signalk-container's recreate removes the old container before it pulls,
+  // so downloading first keeps backups running for the length of the download.
+  async function pullServerImage(tag: string): Promise<void> {
+    const manager = getContainerManager()
+    if (!manager) throw new Error('signalk-container not available')
+    await manager.pullImage(`${BACKUP_IMAGE}:${tag}`)
+  }
+
+  // Moves "auto" to `target`, whose image must already be pulled; rolls back if it does not start.
+  async function installServerRelease(target: string, gen: number): Promise<void> {
+    if (serverInstalling) throw new Error('a backup server update is already running')
+    serverInstalling = true
+    const previous = resolvedAutoTag ?? BACKUP_SERVER_VERSION
+    try {
+      await installServerVersion(target, previous, {
+        swap: async (tag) => {
+          if (gen !== lifecycleGeneration) throw new Error('plugin restarted during the update')
+          resolvedAutoTag = tag
+          await container.applyUpdate('auto')
+        },
+        waitReady: async () => {
+          const addr = await container.resolveAddress(API_PORT)
+          if (!addr) throw new Error('recreated container has no address')
+          await new BackupClient(`http://${addr}`).waitForReady(SERVER_UPDATE_READY_MS)
+          adoptServerAddress(`http://${addr}`)
+        }
+      })
+    } catch (err) {
+      failedServerVersions.add(target)
+      throw err
+    } finally {
+      serverInstalling = false
+    }
+    await persistAppliedTag('auto', target)
+    app.setPluginStatus(`Backup server updated to ${target}`)
+  }
+
+  // A recreated container may come back on another host port.
+  function adoptServerAddress(address: string): void {
+    if (!client || !currentSettings || address === containerAddress) return
+    containerAddress = address
+    client = new BackupClient(address)
+    stopSignalKEmitter()
+    startSignalKEmitter(app, address, { emitSignalKDeltas: currentSettings.emitSignalKDeltas })
+  }
+
+  function scheduleServerUpdate(gen: number, delayMs: number): void {
+    stopServerUpdateTimer()
+    if (currentSettings?.imageTag !== 'auto' || !currentSettings.autoUpdateServer) return
+    serverUpdateTimer = setTimeout(() => {
+      serverUpdateTimer = null
+      void checkServerUpdate(gen).then((nextMs) => {
+        if (gen === lifecycleGeneration) scheduleServerUpdate(gen, nextMs)
+      })
+    }, delayMs)
+  }
+
+  function stopServerUpdateTimer(): void {
+    if (serverUpdateTimer) {
+      clearTimeout(serverUpdateTimer)
+      serverUpdateTimer = null
+    }
+  }
+
+  // Resolves to the delay before the next check; never rejects. Being offline
+  // or failing a download is routine on a boat and only logged; an install
+  // that had to roll back is reported as a plugin error.
+  async function checkServerUpdate(gen: number): Promise<number> {
+    let target: string | null
+    try {
+      const current = resolvedAutoTag
+      const check = await container.checkForUpdate()
+      // An offline result is the cached one, and its download would fail.
+      if (!current || !check || check.reason === 'offline') return SERVER_UPDATE_INTERVAL_MS
+      target = pickServerUpdate(current, check.latestVersion, failedServerVersions)
+      if (!target || gen !== lifecycleGeneration) return SERVER_UPDATE_INTERVAL_MS
+      await pullServerImage(target)
+    } catch (err) {
+      app.debug(`Backup server update check failed: ${errMsg(err)}`)
+      return SERVER_UPDATE_INTERVAL_MS
+    }
+    if (serverInstalling || !(await client?.isIdle())) {
+      app.debug(`Backup server ${target} is downloaded; installing once no restore is running`)
+      return SERVER_UPDATE_BUSY_RETRY_MS
+    }
+    if (gen !== lifecycleGeneration) return SERVER_UPDATE_INTERVAL_MS
+    try {
+      await installServerRelease(target, gen)
+    } catch (err) {
+      if (gen === lifecycleGeneration) {
+        app.setPluginError(`Automatic backup server update failed: ${errMsg(err)}`)
+      }
+    }
+    return SERVER_UPDATE_INTERVAL_MS
   }
 
   async function persistAppliedTag(requestedTag: string, resolvedTag: string): Promise<void> {
@@ -566,9 +675,9 @@ export default function (app: BackupServerAPI): Plugin {
 
   // Lets the next start short-circuit without a lookup; a failed save costs a lookup, never startup.
   async function persistResolvedTag(tag: string, gen: number): Promise<void> {
-    // savePluginOptions writes the whole options object and itself re-runs
-    // start(), so a save from a superseded lifecycle would republish that
-    // generation's imageTag over whatever the user has since saved.
+    // savePluginOptions writes the whole options object, so a save from a
+    // superseded lifecycle would republish that generation's imageTag over
+    // whatever the user has since saved.
     if (gen !== lifecycleGeneration) return
     if (!currentSettings || currentSettings.resolvedImageTag === tag) return
     currentSettings.resolvedImageTag = tag
@@ -671,6 +780,7 @@ export default function (app: BackupServerAPI): Plugin {
       emitSignalKDeltas: settings.emitSignalKDeltas
     })
     startDbExportTimer()
+    scheduleServerUpdate(gen, SERVER_UPDATE_FIRST_CHECK_MS)
   }
 
   async function finishExternal(

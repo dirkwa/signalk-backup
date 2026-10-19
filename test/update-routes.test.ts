@@ -57,6 +57,7 @@ interface ManagerOverrides {
   recreate?: (name: string, config: unknown) => Promise<void>
   listContainers?: () => Promise<unknown[]>
   resolveContainerAddress?: () => Promise<string>
+  pullImage?: (image: string) => Promise<void>
 }
 
 function installManager(overrides: ManagerOverrides = {}) {
@@ -67,7 +68,7 @@ function installManager(overrides: ManagerOverrides = {}) {
     recreate: overrides.recreate ?? (() => Promise.resolve()),
     stop: () => Promise.resolve(),
     remove: () => Promise.resolve(),
-    pullImage: () => Promise.resolve(),
+    pullImage: overrides.pullImage ?? (() => Promise.resolve()),
     getState: () => Promise.resolve('running'),
     listContainers:
       overrides.listContainers ??
@@ -96,13 +97,19 @@ function installManager(overrides: ManagerOverrides = {}) {
   return manager
 }
 
-/** A stand-in backup server that passes the readiness probe; returns host:port. */
-function listenHealthy(): Promise<string> {
+/** A stand-in backup server that is healthy with no restore running; returns host:port. */
+function listenBackupServer(): Promise<string> {
   const server = http.createServer((req, res) => {
-    res.writeHead(req.url?.startsWith('/api/health') ? 200 : 404, {
-      'content-type': 'application/json'
-    })
-    res.end('{}')
+    const url = req.url ?? ''
+    const data = url.startsWith('/api/health')
+      ? { status: 'healthy' }
+      : url.startsWith('/api/backups/restore')
+        ? { state: 'idle' }
+        : url.startsWith('/api/cloud/restore/status')
+          ? { cloudPhase: 'idle' }
+          : null
+    res.writeHead(data ? 200 : 404, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ success: true, data }))
   })
   servers.push(server)
   return new Promise((resolve) => {
@@ -194,10 +201,10 @@ describe('POST /api/update/apply', () => {
   it('installs the release the check reported under "auto", and keeps "auto"', async () => {
     // The card's "Update to X" must land on X. Re-applying the tag the
     // container last started installed nothing and pinned the running version.
-    const address = await listenHealthy()
-    const tags: string[] = []
+    const address = await listenBackupServer()
+    const events: string[] = []
     const capture = (_n: string, c: unknown) => {
-      tags.push((c as { tag: string }).tag)
+      events.push(`run ${(c as { tag: string }).tag}`)
       return Promise.resolve()
     }
     installManager({
@@ -209,6 +216,10 @@ describe('POST /api/update/apply', () => {
         }),
       ensureRunning: capture,
       recreate: capture,
+      pullImage: (image) => {
+        events.push(`pull ${image}`)
+        return Promise.resolve()
+      },
       resolveContainerAddress: () => Promise.resolve(address)
     })
     const { server, app, plugin } = await mountPlugin()
@@ -232,7 +243,11 @@ describe('POST /api/update/apply', () => {
 
     expect(res.status).toBe(200)
     expect(body(res).tag).toBe('99.1.0')
-    expect(tags.at(-1)).toBe('99.1.0')
+    // Downloaded before the swap: recreate removes the old container first.
+    expect(events.slice(-2)).toEqual([
+      'pull ghcr.io/dirkwa/signalk-backup-server:99.1.0',
+      'run 99.1.0'
+    ])
     const saved = app.savePluginOptions.mock.calls.at(-1)?.[0] as
       { imageTag?: string; resolvedImageTag?: string } | undefined
     expect(saved?.imageTag).toBe('auto')
@@ -242,7 +257,7 @@ describe('POST /api/update/apply', () => {
   it('fails the apply when the new version cannot be saved', async () => {
     // The container already runs the new version, but a restart would go back,
     // so the card must not report success.
-    const address = await listenHealthy()
+    const address = await listenBackupServer()
     installManager({
       checkOne: () =>
         Promise.resolve({
@@ -401,5 +416,102 @@ describe('container healthcheck', () => {
     expect(captured?.healthcheck?.interval).toBe('30s')
     expect(captured?.healthcheck?.timeout).toBe('5s')
     expect(captured?.healthcheck?.retries).toBe(3)
+  })
+})
+
+describe('automatic server update', () => {
+  // Same major as the floor: a new major is left to a plugin release.
+  const NEXT = `${BACKUP_SERVER_VERSION.split('.')[0]}.99.0`
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function startAuto(
+    autoUpdateServer: boolean,
+    reason: 'newer-version' | 'offline' = 'newer-version'
+  ) {
+    const address = await listenBackupServer()
+    const events: string[] = []
+    const capture = (_n: string, c: unknown) => {
+      events.push(`run ${(c as { tag: string }).tag}`)
+      return Promise.resolve()
+    }
+    installManager({
+      checkOne: () =>
+        Promise.resolve({
+          updateAvailable: true,
+          latestVersion: NEXT,
+          reason
+        }),
+      ensureRunning: capture,
+      recreate: capture,
+      pullImage: (image) => {
+        events.push(`pull ${image}`)
+        return Promise.resolve()
+      },
+      resolveContainerAddress: () => Promise.resolve(address)
+    })
+    const { app, plugin } = await mountPlugin()
+    plugin.start(
+      {
+        managedContainer: true,
+        imageTag: 'auto',
+        resolvedImageTag: BACKUP_SERVER_VERSION,
+        autoUpdateServer,
+        externalUrl: '',
+        emitSignalKDeltas: false
+      },
+      () => undefined
+    )
+    await until(() =>
+      app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('Backup engine ready'))
+    )
+    return { app, plugin, events }
+  }
+
+  it('installs a newer release on its own, without a click', async () => {
+    // shouldAdvanceTime keeps real I/O and the readiness polls moving.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { app, plugin, events } = await startAuto(true)
+    expect(events).not.toContain(`run ${NEXT}`)
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    await until(() =>
+      app.setPluginStatus.mock.calls.some((c) => c[0] === `Backup server updated to ${NEXT}`)
+    )
+    await plugin.stop()
+
+    expect(events.slice(-2)).toEqual([
+      `pull ghcr.io/dirkwa/signalk-backup-server:${NEXT}`,
+      `run ${NEXT}`
+    ])
+    const saved = app.savePluginOptions.mock.calls.at(-1)?.[0] as
+      { imageTag?: string; resolvedImageTag?: string } | undefined
+    expect(saved?.imageTag).toBe('auto')
+    expect(saved?.resolvedImageTag).toBe(NEXT)
+  })
+
+  it('stays quiet while offline instead of failing a download every check', async () => {
+    // Offline, the update service returns its cached result, which still names the release.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { app, plugin, events } = await startAuto(true, 'offline')
+
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000)
+    await plugin.stop()
+
+    expect(events.filter((e) => e.startsWith('pull'))).toEqual([])
+    expect(app.setPluginError).not.toHaveBeenCalled()
+  })
+
+  it('downloads nothing when automatic updates are off', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { plugin, events } = await startAuto(false)
+
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000)
+    await plugin.stop()
+
+    expect(events.filter((e) => e.startsWith('pull'))).toEqual([])
+    expect(events).not.toContain(`run ${NEXT}`)
   })
 })
