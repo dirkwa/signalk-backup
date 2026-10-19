@@ -21,7 +21,7 @@ updates:
       - dependency-name: "@types/node"
         versions: [">=23"]
       # @module-federation/vite and vite are deliberately NOT pinned here any
-      # more: scripts/check-federation-shares.mjs fails `npm run build` (and
+      # more: scripts/check-federation-shares.ts fails `npm run build` (and
       # so CI and publish) if a bump makes the remote's share map drift from
       # what the Signal K admin UI provides, and `npm run test:e2e` loads the
       # panel in a real admin UI. That is the check a version pin was
