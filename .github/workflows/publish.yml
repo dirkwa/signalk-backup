@@ -89,9 +89,8 @@ jobs:
           fi
 
       - uses: actions/checkout@v7
-
-      - name: Clean workspace
-        run: git clean -xfd
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v7
         with:
@@ -119,7 +118,7 @@ jobs:
               ;;
           esac
 
-      - run: npm install
+      - run: npm ci
 
       - name: Build
         run: npm run build
