@@ -33,6 +33,7 @@ import { runAllExports } from './database-export/index.js'
 import { registerStagingRoutes } from './database-export/staging-routes.js'
 import { isHostRestoreRunning, registerHostRestoreRoutes } from './restore-host-write.js'
 import { startSignalKEmitter, stopSignalKEmitter } from './signalk-deltas.js'
+import { UplinkReporter } from './uplink-state.js'
 import { resolveSignalkBaseUrl as resolveBaseUrl } from './signalk-base-url.js'
 import { errMsg } from './errors.js'
 
@@ -105,6 +106,7 @@ export default function (app: BackupServerAPI): Plugin {
   // Cancels in-flight container work on stop(); recreated per start().
   let startAbort: AbortController | null = null
   let serverUpdateTimer: NodeJS.Timeout | null = null
+  const uplinkReporter = new UplinkReporter({ app, target: () => client })
   // Releases that would not start; the automatic updater skips them until Signal K restarts.
   const failedServerVersions = new Set<string>()
   // One install at a time: "Apply update" and the automatic updater both swap the container.
@@ -253,6 +255,7 @@ export default function (app: BackupServerAPI): Plugin {
       client = null
       containerAddress = null
       stopServerUpdateTimer()
+      uplinkReporter.stop()
       // startSafely: SignalK does not await start(), and it demotes the
       // helper's `cancelled` error to debug so stopping mid-startup doesn't
       // leave "Startup failed: Operation cancelled" in the plugin error box.
@@ -270,6 +273,7 @@ export default function (app: BackupServerAPI): Plugin {
       stopSignalKEmitter()
       stopDbExportTimer()
       stopServerUpdateTimer()
+      uplinkReporter.stop()
       shutdownSmbDiscovery()
       client = null
       containerAddress = null
@@ -543,6 +547,7 @@ export default function (app: BackupServerAPI): Plugin {
       }
       const applied = await container.applyUpdate(requested)
       await persistAppliedTag(requested, applied.tag)
+      uplinkReporter.start()
       return applied.tag
     })
     // The apply saved imageTag without a restart: a pinned tag stops the updater, "auto" re-arms it.
@@ -591,6 +596,8 @@ export default function (app: BackupServerAPI): Plugin {
       throw err
     }
     await persistAppliedTag('auto', target)
+    // The recreated server starts without the link state, even when it kept its address.
+    uplinkReporter.start()
     app.setPluginStatus(`Backup server updated to ${target}`)
   }
 
@@ -601,6 +608,7 @@ export default function (app: BackupServerAPI): Plugin {
     client = new BackupClient(address)
     stopSignalKEmitter()
     startSignalKEmitter(app, address, { emitSignalKDeltas: currentSettings.emitSignalKDeltas })
+    void uplinkReporter.report()
   }
 
   function autoUpdateEnabled(): boolean {
@@ -812,6 +820,7 @@ export default function (app: BackupServerAPI): Plugin {
     })
     startDbExportTimer()
     scheduleServerUpdate(gen, SERVER_UPDATE_FIRST_CHECK_MS)
+    uplinkReporter.start()
   }
 
   function finishExternal(gen: number, settings: Config, c: BackupClient, url: string): void {
@@ -820,6 +829,7 @@ export default function (app: BackupServerAPI): Plugin {
     client = c
     app.setPluginStatus(`Connected to external backup-server at ${url}`)
     startSignalKEmitter(app, url, { emitSignalKDeltas: settings.emitSignalKDeltas })
+    uplinkReporter.start()
     if (
       settings.databaseExport.questdb ||
       settings.databaseExport.grafana ||

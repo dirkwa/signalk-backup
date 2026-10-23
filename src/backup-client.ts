@@ -9,11 +9,14 @@
  *   - waitForReady() — poll /api/health until 200 or timeout
  *   - getGuiUrl()    — GET  /api/gui-url (used by the redirect HTML's proxy)
  *   - isIdle()       — no restore running (gates an automatic server update)
+ *   - putUplinkState() — PUT /api/cloud/uplink (holds automatic cloud syncs on a metered link)
  *
  * The full API surface (settings, backups list/create/restore, cloud sync,
  * etc.) is exercised by the container's own UI. The plugin doesn't need to
  * wrap it; the server's own defaults cover a fresh install.
  */
+
+import type { UplinkState } from './uplink-state.js'
 
 // States in which no restore is running: the flow either never started or has ended.
 const SETTLED_RESTORE_STATES: ReadonlySet<string> = new Set([
@@ -139,6 +142,10 @@ export class BackupClient {
     } catch {
       return false
     }
+  }
+
+  async putUplinkState(state: UplinkState): Promise<void> {
+    await this.request('/api/cloud/uplink', { method: 'PUT', body: JSON.stringify({ state }) })
   }
 
   get base(): string {
