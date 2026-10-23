@@ -5,31 +5,15 @@
  * base URL via signalk-container's resolveContainerAddress() after
  * ensureRunning(), then constructs this client.
  *
- * Methods used by the plugin's first-run logic:
+ * Methods the plugin calls itself:
  *   - waitForReady() — poll /api/health until 200 or timeout
- *   - getSettings()  — GET  /api/settings (read scheduler/cloud config)
- *   - putSettings()  — PUT  /api/settings (seed default schedule on first run)
  *   - getGuiUrl()    — GET  /api/gui-url (used by the redirect HTML's proxy)
  *   - isIdle()       — no restore running (gates an automatic server update)
  *
- * The full API surface (backups list/create/restore, cloud sync, etc.) is
- * exercised by the container's own UI. The plugin doesn't need to wrap it.
+ * The full API surface (settings, backups list/create/restore, cloud sync,
+ * etc.) is exercised by the container's own UI. The plugin doesn't need to
+ * wrap it; the server's own defaults cover a fresh install.
  */
-
-export interface BackupServerSettings {
-  scheduler?: {
-    configured?: boolean
-    daily?: { enabled: boolean; retain: number }
-    hourly?: { enabled: boolean; retain: number }
-    weekly?: { enabled: boolean; retain: number }
-    startup?: { enabled: boolean; retain: number }
-  }
-  cloud?: {
-    mode?: 'off' | 'manual' | 'daily' | 'weekly'
-  }
-  excludes?: string[]
-  [key: string]: unknown
-}
 
 // States in which no restore is running: the flow either never started or has ended.
 const SETTLED_RESTORE_STATES: ReadonlySet<string> = new Set([
@@ -130,17 +114,6 @@ export class BackupClient {
     }
     throw new Error(`backup-server at ${this.baseUrl} did not become ready within ${maxMs}ms`, {
       cause: lastErr
-    })
-  }
-
-  async getSettings(): Promise<BackupServerSettings> {
-    return this.request<BackupServerSettings>('/api/settings')
-  }
-
-  async putSettings(patch: Partial<BackupServerSettings>): Promise<BackupServerSettings> {
-    return this.request<BackupServerSettings>('/api/settings', {
-      method: 'PUT',
-      body: JSON.stringify(patch)
     })
   }
 

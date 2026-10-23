@@ -745,7 +745,7 @@ export default function (app: BackupServerAPI): Plugin {
           if (gen !== lifecycleGeneration) return
           // retryForever only checks between attempts, so the signal must reach the probe itself.
           await external.waitForReady(15_000, 1000, signal)
-          await finishExternal(gen, settings, external, url)
+          finishExternal(gen, settings, external, url)
         },
         {
           minDelayMs: READY_RETRY_MIN_MS,
@@ -794,20 +794,19 @@ export default function (app: BackupServerAPI): Plugin {
     containerAddress = address
     // Managed mode assigns `client` only after /api/health answers, so /status reports having reached the upstream rather than just knowing its address.
     const pending = new BackupClient(address)
-    await finishStartup(gen, settings, pending, address)
+    finishStartup(gen, settings, pending, address)
   }
 
   // Generation-guarded so a stop()/restart during a slow health probe can't resurrect stale timers or emitters.
-  async function finishStartup(
+  function finishStartup(
     gen: number,
     settings: Config,
     pending: BackupClient,
     address: string
-  ): Promise<void> {
+  ): void {
     if (gen !== lifecycleGeneration) return
     client = pending
-    await seedFirstRunSchedule(pending)
-    if (gen !== lifecycleGeneration) return
+    app.setPluginStatus(`Backup engine ready at ${address}`)
     startSignalKEmitter(app, address, {
       emitSignalKDeltas: settings.emitSignalKDeltas
     })
@@ -815,18 +814,11 @@ export default function (app: BackupServerAPI): Plugin {
     scheduleServerUpdate(gen, SERVER_UPDATE_FIRST_CHECK_MS)
   }
 
-  async function finishExternal(
-    gen: number,
-    settings: Config,
-    c: BackupClient,
-    url: string
-  ): Promise<void> {
+  function finishExternal(gen: number, settings: Config, c: BackupClient, url: string): void {
     if (gen !== lifecycleGeneration) return
     // Deferred to here so ready cannot be true before the upstream answered.
     client = c
     app.setPluginStatus(`Connected to external backup-server at ${url}`)
-    await seedFirstRunSchedule(c)
-    if (gen !== lifecycleGeneration) return
     startSignalKEmitter(app, url, { emitSignalKDeltas: settings.emitSignalKDeltas })
     if (
       settings.databaseExport.questdb ||
@@ -953,38 +945,6 @@ export default function (app: BackupServerAPI): Plugin {
 
   function resolveSignalkBaseUrl(): string {
     return resolveBaseUrl(app)
-  }
-
-  async function seedFirstRunSchedule(c: BackupClient): Promise<void> {
-    try {
-      const existing = await c.getSettings()
-      const alreadyConfigured = existing.scheduler?.configured === true
-      if (alreadyConfigured) {
-        app.setPluginStatus(`Backup engine ready at ${containerAddress}`)
-        return
-      }
-
-      // First run: opt-in safe defaults — daily local-only backup, no cloud.
-      // The user must explicitly enable cloud sync from the GUI.
-      await c.putSettings({
-        scheduler: {
-          configured: true,
-          daily: { enabled: true, retain: 7 },
-          hourly: { enabled: false, retain: 24 },
-          weekly: { enabled: false, retain: 4 },
-          startup: { enabled: true, retain: 3 }
-        },
-        cloud: { mode: 'off' }
-      })
-      app.setPluginStatus(
-        `First-run: seeded daily local backup schedule. Open Backup Console to configure.`
-      )
-    } catch (err) {
-      // Don't fail startup if seeding fails — the container is up and the
-      // user can configure manually from the UI.
-      app.debug(`First-run seed failed (non-fatal): ${errMsg(err)}`)
-      app.setPluginStatus(`Backup engine ready at ${containerAddress}`)
-    }
   }
 
   return plugin
