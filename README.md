@@ -13,7 +13,7 @@ The plugin runs a React webapp inside the SignalK Admin UI and orchestrates a se
 - **Restore-anywhere** — custom-path restores stream through the plugin and write under the SignalK user's permissions, so you can land restored bytes in `/tmp`, `/media/usb/...`, or your home directory — anywhere your user can write
 - **Restore with safety backup** — every full restore creates a snapshot of the current state first; partial restores stash the existing target as a sibling before overwriting. Both flows can be rolled back automatically on failure
 - **Database export pipeline** — opt-in exporters for [signalk-questdb](https://github.com/dirkwa/signalk-questdb), [signalk-grafana](https://github.com/dirkwa/signalk-grafana), and [signalk-database](https://github.com/dirkwa/signalk-database) periodically write consistent snapshots (parquet, SQLite checkpoint, provisioning YAML) to a staging dir that Kopia includes in every snapshot. Live DB files are excluded from filesystem backup to avoid torn-write hazards. The dedicated "Database exports" tab also extracts the export subtree from any historical backup without pulling the whole snapshot — a direct answer to "QuestDB shards bloat the full zip"
-- **First-run safe default** — installs with a daily local-only schedule already seeded; no surprise data egress
+- **Safe defaults** — a fresh install backs up locally on the hourly / daily / weekly / on-startup tiers (24 / 7 / 4 / 3 kept); nothing leaves the boat until you connect a cloud or network destination
 - **Update detection** — checks ghcr.io for new container images via signalk-container's centralized update service
 - **SignalK delta publishing** — each scheduled run emits `server.backup.*` metric paths and `notifications.server.backup.*` alarms on the SignalK delta stream, so KIP / Freeboard / dashboards see backup health natively (see [SignalK paths published](#signalk-paths-published) below)
 
@@ -28,7 +28,7 @@ The plugin runs a React webapp inside the SignalK Admin UI and orchestrates a se
 
 ```bash
 # Via the SignalK Admin UI: Server → Appstore → "signalk-backup"
-# (auto-enables on install — first-run schedules a daily local backup)
+# (auto-enables on install — local backups start on the server's default schedule)
 ```
 
 The plugin pulls `ghcr.io/dirkwa/signalk-backup-server` at a server version it pins itself (see [src/config/image-tag.ts](src/config/image-tag.ts)). Plugin releases and server releases are decoupled — you can pin or float either independently via the plugin's `imageTag` setting.

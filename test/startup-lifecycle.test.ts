@@ -75,10 +75,11 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((d) => rm(d, { recursive: true, force: true })))
 })
 
-describe('first-run seeding is non-fatal', () => {
-  // Enforced inside seedFirstRunSchedule's try/catch, so the call sites would not fail if it were removed.
-  it('reports the engine as ready even when GET /api/settings fails', async () => {
+describe('startup leaves the server settings alone', () => {
+  // The server's own defaults cover a fresh install, and PUT /api/settings rejects schedule keys anyway.
+  it('finishes startup without calling /api/settings', async () => {
     let healthHits = 0
+    const settingsCalls: string[] = []
     const base = await listen((req, res) => {
       if (req.url?.startsWith('/api/health')) {
         healthHits++
@@ -86,71 +87,26 @@ describe('first-run seeding is non-fatal', () => {
         res.end(JSON.stringify({ status: 'ok' }))
         return
       }
-      if (req.url?.startsWith('/api/settings')) {
-        // The seeding step's first call — fail it.
-        res.writeHead(500, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ error: 'boom' }))
-        return
-      }
+      if (req.url?.startsWith('/api/settings')) settingsCalls.push(`${req.method} ${req.url}`)
       res.writeHead(404)
       res.end()
     })
 
     const { plugin, app } = await startPlugin(base)
 
-    // Startup must reach its terminal "ready" status despite the seed failing.
-    const reached = await until(() =>
-      app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('Backup engine ready'))
+    // The emitter starts last, so its debug line marks the end of startup.
+    const finished = await until(() =>
+      app.debug.mock.calls.some((c) => String(c[0]).includes('not starting subscriber'))
     )
+    // Read before stop(), which sets "Stopped".
+    const statuses = app.setPluginStatus.mock.calls.map((c) => String(c[0]))
     await plugin.stop()
 
     expect(healthHits).toBeGreaterThan(0)
-    expect(reached).toBe(true)
-    // A non-fatal step must not surface as a plugin error.
-    const errors = app.setPluginError.mock.calls.map((c) => String(c[0]))
-    expect(errors.filter((e) => e.includes('unreachable'))).toHaveLength(0)
-  })
-
-  it('seeds the schedule and reports ready when the server is healthy', async () => {
-    let putBody: unknown
-    const base = await listen((req, res) => {
-      if (req.url?.startsWith('/api/health')) {
-        res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ status: 'ok' }))
-        return
-      }
-      if (req.url?.startsWith('/api/settings') && req.method === 'GET') {
-        res.writeHead(200, { 'content-type': 'application/json' })
-        // Not configured yet -> the plugin should seed.
-        res.end(JSON.stringify({ scheduler: { configured: false } }))
-        return
-      }
-      if (req.url?.startsWith('/api/settings') && req.method === 'PUT') {
-        const chunks: Buffer[] = []
-        req.on('data', (c: Buffer) => chunks.push(c))
-        req.on('end', () => {
-          putBody = JSON.parse(Buffer.concat(chunks).toString()) as unknown
-          res.writeHead(200, { 'content-type': 'application/json' })
-          res.end(JSON.stringify({ ok: true }))
-        })
-        return
-      }
-      res.writeHead(404)
-      res.end()
-    })
-
-    const { plugin, app } = await startPlugin(base)
-    const seeded = await until(() =>
-      app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('First-run'))
-    )
-    await plugin.stop()
-
-    expect(seeded).toBe(true)
-    // Safe defaults: a daily local backup, cloud sync left off for the user to enable.
-    expect(putBody).toMatchObject({
-      scheduler: { configured: true, daily: { enabled: true } },
-      cloud: { mode: 'off' }
-    })
+    expect(finished).toBe(true)
+    expect(settingsCalls).toEqual([])
+    expect(statuses.at(-1)).toContain('Connected to external backup-server')
+    expect(app.setPluginError).not.toHaveBeenCalled()
   })
 })
 
