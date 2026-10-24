@@ -33,7 +33,7 @@ import { runAllExports } from './database-export/index.js'
 import { registerStagingRoutes } from './database-export/staging-routes.js'
 import { isHostRestoreRunning, registerHostRestoreRoutes } from './restore-host-write.js'
 import { startSignalKEmitter, stopSignalKEmitter } from './signalk-deltas.js'
-import { UplinkReporter } from './uplink-state.js'
+import { UplinkReporter, type GetPluginsList } from './uplink-state.js'
 import { resolveSignalkBaseUrl as resolveBaseUrl } from './signalk-base-url.js'
 import { errMsg } from './errors.js'
 
@@ -106,7 +106,8 @@ export default function (app: BackupServerAPI): Plugin {
   // Cancels in-flight container work on stop(); recreated per start().
   let startAbort: AbortController | null = null
   let serverUpdateTimer: NodeJS.Timeout | null = null
-  const uplinkReporter = new UplinkReporter({ app, target: () => client })
+  const { getPluginsList } = app as BackupServerAPI & { getPluginsList?: GetPluginsList }
+  const uplinkReporter = new UplinkReporter({ app, target: () => client, getPluginsList })
   // Releases that would not start; the automatic updater skips them until Signal K restarts.
   const failedServerVersions = new Set<string>()
   // One install at a time: "Apply update" and the automatic updater both swap the container.
@@ -145,7 +146,9 @@ export default function (app: BackupServerAPI): Plugin {
       HOST_HOSTNAME: hostname(),
       // Hardcoded to "info" — power users override via signalk-container's
       // containerOverrides.signalk-backup-server.env.LOG_LEVEL.
-      LOG_LEVEL: 'info'
+      LOG_LEVEL: 'info',
+      // Automatic cloud syncs on a fresh start wait for the first link report from this plugin.
+      UPLINK_REPORTS: 'true'
     },
     resources: DEFAULT_RESOURCES,
     // CMD-SHELL, not CMD: the CMD form is re-split on whitespace before it
