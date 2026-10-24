@@ -622,6 +622,33 @@ describe('automatic server update', () => {
     expect(app.setPluginError).not.toHaveBeenCalled()
   })
 
+  it('waits on a metered link and updates once it clears', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { app, plugin, events } = await startAuto(true)
+    let link = 'metered'
+    app.getSelfPath.mockImplementation((p) =>
+      p === 'network.internet.state' ? { value: link } : undefined
+    )
+
+    await vi.advanceTimersByTimeAsync(6 * 60 * 60_000)
+    expect(events.filter((e) => e.startsWith('pull'))).toEqual([])
+
+    link = 'online'
+    // Step in minutes so the real requests behind each check can answer between timer jumps.
+    const updated = () =>
+      app.setPluginStatus.mock.calls.some((c) => c[0] === `Backup server updated to ${NEXT}`)
+    for (let i = 0; i < 40 && !updated(); i++) {
+      await vi.advanceTimersByTimeAsync(60_000)
+      await until(updated, 100)
+    }
+    await plugin.stop()
+
+    expect(events.slice(-2)).toEqual([
+      `pull ghcr.io/dirkwa/signalk-backup-server:${NEXT}`,
+      `run ${NEXT}`
+    ])
+  })
+
   it('stops once "Apply update" pins a version', async () => {
     // The apply saves imageTag without a restart, so the generation does not change.
     vi.useFakeTimers({ shouldAdvanceTime: true })

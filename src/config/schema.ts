@@ -38,8 +38,9 @@ export const ConfigSchema = Type.Object({
       'With image tag "auto", install new backup server releases of the same major version ' +
       'without asking: the plugin checks every 6 hours, downloads the new image (about 430MB) ' +
       'while the running server keeps working, and switches once no restore is running. If the ' +
-      'new version does not start, it goes back to the previous one. Turn this off on a metered ' +
-      'link; updates then wait for "Apply update" in the Backup app.'
+      'new version does not start, it goes back to the previous one. While signalk-internet ' +
+      'reports a metered, captive or offline link, the check waits; "Apply update" in the ' +
+      'Backup app always runs.'
   }),
   externalUrl: Type.String({
     default: '',
