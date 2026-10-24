@@ -668,8 +668,9 @@ export default function (app: BackupServerAPI): Plugin {
       if (!wanted()) return SERVER_UPDATE_INTERVAL_MS
       const check = await container.checkForUpdate()
       const current = resolvedAutoTag
-      // An offline result is the cached one, and its download would fail.
-      if (!current || !check || check.reason === 'offline') return SERVER_UPDATE_INTERVAL_MS
+      if (!current || !check) return SERVER_UPDATE_INTERVAL_MS
+      // An offline result is the cached one, and its download would fail; look again soon, as for a held link.
+      if (check.reason === 'offline') return SERVER_UPDATE_BUSY_RETRY_MS
       target = pickServerUpdate(current, check.latestVersion, failedServerVersions)
       if (!target || !wanted()) return SERVER_UPDATE_INTERVAL_MS
       // Read right before the pull: the link can turn metered while the check is out.
