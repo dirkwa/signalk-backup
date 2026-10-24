@@ -54,6 +54,7 @@ function makeApp(dataDir: string) {
       cb(null)
     }),
     getDataDirPath: () => dataDir,
+    getSelfPath: vi.fn<(path: string) => unknown>(() => undefined),
     handleMessage: vi.fn()
   }
 }
@@ -105,9 +106,23 @@ function installManager(overrides: ManagerOverrides = {}) {
 }
 
 /** A stand-in backup server that is healthy with no restore running; returns host:port. */
-function listenBackupServer(): Promise<string> {
+function listenBackupServer(
+  requests: string[] = [],
+  uplinkBodies: unknown[] = []
+): Promise<string> {
   const server = http.createServer((req, res) => {
     const url = req.url ?? ''
+    requests.push(`${req.method ?? ''} ${url}`)
+    if (req.method === 'PUT' && url === '/api/cloud/uplink') {
+      let body = ''
+      req.on('data', (chunk: Buffer) => (body += chunk.toString()))
+      req.on('end', () => {
+        uplinkBodies.push(JSON.parse(body))
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ success: true, data: null }))
+      })
+      return
+    }
     const data = url.startsWith('/api/health')
       ? { status: 'healthy' }
       : url.startsWith('/api/backups/restore')
@@ -192,7 +207,8 @@ describe('POST /api/update/apply', () => {
     // probe, which retries forever by design. It only appeared to work
     // locally because the fake address (127.0.0.1:3010) happens to be a real
     // backup-server on a dev box; on CI nothing answers and the test hangs.
-    installManager()
+    const address = await listenBackupServer()
+    installManager({ resolveContainerAddress: () => Promise.resolve(address) })
     const { server } = await mountPlugin()
 
     const res = await request(server).post('/api/update/apply').send({})
@@ -330,6 +346,70 @@ describe('POST /api/update/apply', () => {
 
     expect(res.status).toBe(503)
     expect(body(res).error).toMatch(/signalk-container/i)
+  })
+})
+
+describe('"Apply update" with a new address', () => {
+  it('reports the link state to the recreated server', async () => {
+    const before = await listenBackupServer()
+    const afterUplinks: unknown[] = []
+    const after = await listenBackupServer([], afterUplinks)
+    let address = before
+    installManager({ resolveContainerAddress: () => Promise.resolve(address) })
+    const { server, app, plugin } = await mountPlugin()
+    plugin.start(
+      {
+        managedContainer: true,
+        imageTag: BACKUP_SERVER_VERSION,
+        externalUrl: '',
+        emitSignalKDeltas: false
+      },
+      () => undefined
+    )
+    await until(() =>
+      app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('Backup engine ready'))
+    )
+
+    app.getSelfPath.mockReturnValue({ value: 'metered' })
+    address = after
+    const res = await request(server).post('/api/update/apply').send({ tag: BACKUP_SERVER_VERSION })
+    await until(() => afterUplinks.length > 0)
+    await plugin.stop()
+
+    expect(res.status).toBe(200)
+    expect(afterUplinks[0]).toEqual({ state: 'metered' })
+  })
+
+  it('follows the recreated server even when saving the tag fails', async () => {
+    const before = await listenBackupServer()
+    const afterUplinks: unknown[] = []
+    const after = await listenBackupServer([], afterUplinks)
+    let address = before
+    installManager({ resolveContainerAddress: () => Promise.resolve(address) })
+    const { server, app, plugin } = await mountPlugin()
+    plugin.start(
+      {
+        managedContainer: true,
+        imageTag: BACKUP_SERVER_VERSION,
+        externalUrl: '',
+        emitSignalKDeltas: false
+      },
+      () => undefined
+    )
+    await until(() =>
+      app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('Backup engine ready'))
+    )
+
+    app.savePluginOptions.mockImplementation((_o: unknown, cb: (e: Error | null) => void) => {
+      cb(new Error('ENOSPC'))
+    })
+    address = after
+    const res = await request(server).post('/api/update/apply').send({ tag: BACKUP_SERVER_VERSION })
+    await until(() => afterUplinks.length > 0)
+    await plugin.stop()
+
+    expect(res.status).toBe(500)
+    expect(afterUplinks.length).toBeGreaterThan(0)
   })
 })
 

@@ -83,6 +83,7 @@ function makeApp(dataDir: string) {
       cb(null)
     }),
     getDataDirPath: () => dataDir,
+    getSelfPath: () => undefined,
     handleMessage: vi.fn()
   }
 }

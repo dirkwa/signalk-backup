@@ -34,6 +34,7 @@ function makeApp(dataDir: string) {
       cb(null)
     }),
     getDataDirPath: () => dataDir,
+    getSelfPath: () => undefined,
     handleMessage: vi.fn(),
     setProviderStatus: vi.fn(),
     setProviderError: vi.fn()
