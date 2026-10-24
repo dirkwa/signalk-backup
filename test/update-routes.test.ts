@@ -54,7 +54,7 @@ function makeApp(dataDir: string) {
       cb(null)
     }),
     getDataDirPath: () => dataDir,
-    getSelfPath: () => undefined,
+    getSelfPath: vi.fn<(path: string) => unknown>(() => undefined),
     handleMessage: vi.fn()
   }
 }
@@ -106,10 +106,23 @@ function installManager(overrides: ManagerOverrides = {}) {
 }
 
 /** A stand-in backup server that is healthy with no restore running; returns host:port. */
-function listenBackupServer(requests: string[] = []): Promise<string> {
+function listenBackupServer(
+  requests: string[] = [],
+  uplinkBodies: unknown[] = []
+): Promise<string> {
   const server = http.createServer((req, res) => {
     const url = req.url ?? ''
     requests.push(`${req.method ?? ''} ${url}`)
+    if (req.method === 'PUT' && url === '/api/cloud/uplink') {
+      let body = ''
+      req.on('data', (chunk: Buffer) => (body += chunk.toString()))
+      req.on('end', () => {
+        uplinkBodies.push(JSON.parse(body))
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ success: true, data: null }))
+      })
+      return
+    }
     const data = url.startsWith('/api/health')
       ? { status: 'healthy' }
       : url.startsWith('/api/backups/restore')
@@ -194,7 +207,8 @@ describe('POST /api/update/apply', () => {
     // probe, which retries forever by design. It only appeared to work
     // locally because the fake address (127.0.0.1:3010) happens to be a real
     // backup-server on a dev box; on CI nothing answers and the test hangs.
-    installManager()
+    const address = await listenBackupServer()
+    installManager({ resolveContainerAddress: () => Promise.resolve(address) })
     const { server } = await mountPlugin()
 
     const res = await request(server).post('/api/update/apply').send({})
@@ -338,8 +352,8 @@ describe('POST /api/update/apply', () => {
 describe('"Apply update" with a new address', () => {
   it('reports the link state to the recreated server', async () => {
     const before = await listenBackupServer()
-    const afterRequests: string[] = []
-    const after = await listenBackupServer(afterRequests)
+    const afterUplinks: unknown[] = []
+    const after = await listenBackupServer([], afterUplinks)
     let address = before
     installManager({ resolveContainerAddress: () => Promise.resolve(address) })
     const { server, app, plugin } = await mountPlugin()
@@ -356,13 +370,14 @@ describe('"Apply update" with a new address', () => {
       app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('Backup engine ready'))
     )
 
+    app.getSelfPath.mockReturnValue({ value: 'metered' })
     address = after
     const res = await request(server).post('/api/update/apply').send({ tag: BACKUP_SERVER_VERSION })
-    const reported = await until(() => afterRequests.includes('PUT /api/cloud/uplink'))
+    await until(() => afterUplinks.length > 0)
     await plugin.stop()
 
     expect(res.status).toBe(200)
-    expect(reported).toBe(true)
+    expect(afterUplinks[0]).toEqual({ state: 'metered' })
   })
 })
 

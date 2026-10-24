@@ -546,9 +546,12 @@ export default function (app: BackupServerAPI): Plugin {
         }
       }
       const applied = await container.applyUpdate(requested)
+      // The container already runs the new tag, so it is saved even if the server then fails to come up.
       await persistAppliedTag(requested, applied.tag)
       const addr = await container.resolveAddress(API_PORT)
-      if (addr) adoptServerAddress(`http://${addr}`)
+      if (!addr) throw new Error('recreated container has no address')
+      adoptServerAddress(`http://${addr}`)
+      await new BackupClient(`http://${addr}`).waitForReady(SERVER_UPDATE_READY_MS)
       uplinkReporter.start()
       return applied.tag
     })
