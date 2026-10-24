@@ -547,6 +547,8 @@ export default function (app: BackupServerAPI): Plugin {
       }
       const applied = await container.applyUpdate(requested)
       await persistAppliedTag(requested, applied.tag)
+      const addr = await container.resolveAddress(API_PORT)
+      if (addr) adoptServerAddress(`http://${addr}`)
       uplinkReporter.start()
       return applied.tag
     })
