@@ -379,6 +379,38 @@ describe('"Apply update" with a new address', () => {
     expect(res.status).toBe(200)
     expect(afterUplinks[0]).toEqual({ state: 'metered' })
   })
+
+  it('follows the recreated server even when saving the tag fails', async () => {
+    const before = await listenBackupServer()
+    const afterUplinks: unknown[] = []
+    const after = await listenBackupServer([], afterUplinks)
+    let address = before
+    installManager({ resolveContainerAddress: () => Promise.resolve(address) })
+    const { server, app, plugin } = await mountPlugin()
+    plugin.start(
+      {
+        managedContainer: true,
+        imageTag: BACKUP_SERVER_VERSION,
+        externalUrl: '',
+        emitSignalKDeltas: false
+      },
+      () => undefined
+    )
+    await until(() =>
+      app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('Backup engine ready'))
+    )
+
+    app.savePluginOptions.mockImplementation((_o: unknown, cb: (e: Error | null) => void) => {
+      cb(new Error('ENOSPC'))
+    })
+    address = after
+    const res = await request(server).post('/api/update/apply').send({ tag: BACKUP_SERVER_VERSION })
+    await until(() => afterUplinks.length > 0)
+    await plugin.stop()
+
+    expect(res.status).toBe(500)
+    expect(afterUplinks.length).toBeGreaterThan(0)
+  })
 })
 
 describe('"auto" image tag', () => {

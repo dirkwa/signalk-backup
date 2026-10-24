@@ -549,13 +549,20 @@ export default function (app: BackupServerAPI): Plugin {
         }
       }
       const applied = await container.applyUpdate(requested)
-      // The container already runs the new tag, so it is saved even if the server then fails to come up.
-      await persistAppliedTag(requested, applied.tag)
+      // The container already runs the new tag, so it is saved even if the server then fails to come up,
+      // and a failed save still lets the plugin follow the recreated container.
+      let saveError: Error | undefined
+      try {
+        await persistAppliedTag(requested, applied.tag)
+      } catch (err) {
+        saveError = err instanceof Error ? err : new Error(String(err))
+      }
       const addr = await container.resolveAddress(API_PORT)
       if (!addr) throw new Error('recreated container has no address')
       adoptServerAddress(`http://${addr}`)
       await new BackupClient(`http://${addr}`).waitForReady(SERVER_UPDATE_READY_MS)
       uplinkReporter.start()
+      if (saveError) throw saveError
       return applied.tag
     })
     // The apply saved imageTag without a restart: a pinned tag stops the updater, "auto" re-arms it.
