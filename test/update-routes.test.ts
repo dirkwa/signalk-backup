@@ -181,10 +181,13 @@ async function until(predicate: () => boolean, budgetMs = 4000): Promise<boolean
 }
 
 /** Mounts the plugin's real router so requests exercise the wire contract. */
-async function mountPlugin() {
+async function mountPlugin(plugins?: { id: string; enabled: boolean }[]) {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'sk-backup-update-'))
   tempDirs.push(dataDir)
-  const app = makeApp(dataDir)
+  const app = Object.assign(
+    makeApp(dataDir),
+    plugins ? { getPluginsList: () => Promise.resolve(plugins) } : {}
+  )
   const plugin = createPlugin(app as unknown as BackupServerAPI)
   const router = express.Router()
   plugin.registerWithRouter?.(router)
@@ -547,7 +550,8 @@ describe('automatic server update', () => {
   async function startAuto(
     autoUpdateServer: boolean,
     reason: 'newer-version' | 'offline' = 'newer-version',
-    pull: () => Promise<void> = () => Promise.resolve()
+    pull: () => Promise<void> = () => Promise.resolve(),
+    plugins?: { id: string; enabled: boolean }[]
   ) {
     const address = await listenBackupServer()
     const events: string[] = []
@@ -570,7 +574,7 @@ describe('automatic server update', () => {
       },
       resolveContainerAddress: () => Promise.resolve(address)
     })
-    const { server, app, plugin } = await mountPlugin()
+    const { server, app, plugin } = await mountPlugin(plugins)
     plugin.start(
       {
         managedContainer: true,
@@ -647,6 +651,22 @@ describe('automatic server update', () => {
       `pull ghcr.io/dirkwa/signalk-backup-server:${NEXT}`,
       `run ${NEXT}`
     ])
+  })
+
+  it('ignores a metered state left behind by a disabled signalk-internet', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { app, plugin, events } = await startAuto(true, 'newer-version', undefined, [
+      { id: 'signalk-internet', enabled: false }
+    ])
+    app.getSelfPath.mockImplementation((p) =>
+      p === 'network.internet.state' ? { value: 'metered' } : undefined
+    )
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    await until(() => events.some((e) => e.startsWith('pull')))
+    await plugin.stop()
+
+    expect(events).toContain(`pull ghcr.io/dirkwa/signalk-backup-server:${NEXT}`)
   })
 
   it('stops once "Apply update" pins a version', async () => {
