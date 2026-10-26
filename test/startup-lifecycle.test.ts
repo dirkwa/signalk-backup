@@ -34,7 +34,7 @@ function makeApp(dataDir: string) {
       cb(null)
     }),
     getDataDirPath: () => dataDir,
-    getSelfPath: () => undefined,
+    subscriptionmanager: { subscribe: vi.fn(), unsubscribe: vi.fn() },
     handleMessage: vi.fn(),
     setProviderStatus: vi.fn(),
     setProviderError: vi.fn()
