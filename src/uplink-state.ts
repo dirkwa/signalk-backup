@@ -116,8 +116,11 @@ export class UplinkReporter {
     const state = toUplinkState(this.value)
     if (state !== null || !this.waiting()) return state
     // Asked now rather than at start: the server adds a plugin to its list only after starting it.
-    if (!(await this.publisherEnabled())) return null
-    return toUplinkState(this.value) ?? (this.waiting() ? 'waiting' : null)
+    const enabled = await this.publisherEnabled()
+    // A state published while the plugin list was being read is believed like any other.
+    const published = toUplinkState(this.value)
+    if (published !== null || !enabled) return published
+    return this.waiting() ? 'waiting' : null
   }
 
   /** Takes the state from a delta; a null (signalk-internet stopped) starts a new wait. */
