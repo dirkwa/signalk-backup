@@ -44,7 +44,7 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((d) => rm(d, { recursive: true, force: true })))
 })
 
-// Signal K's subscription manager as the uplink reporter uses it: a subscription gets the last published value at once.
+/** Signal K's subscription manager as the uplink reporter uses it: a subscription gets the last published value at once. */
 function fakeSubscriptions() {
   let last: unknown
   const listeners = new Set<(delta: unknown) => void>()

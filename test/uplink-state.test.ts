@@ -9,8 +9,10 @@ import {
   type UplinkState
 } from '../src/uplink-state.js'
 
-// A server whose subscription manager sends `cached` when the subscription starts, as Signal K does with
-// the last value; `publish` delivers the next one.
+/**
+ * A server whose subscription manager sends `cached` when the subscription starts, as Signal K does with
+ * the last value; `publish` delivers the next one.
+ */
 function serverWith(cached: unknown) {
   let deliver: ((value: unknown) => void) | null = null
   const server = { unsubscribed: 0 }

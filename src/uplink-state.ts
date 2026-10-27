@@ -13,6 +13,7 @@ export const UPLINK_RESEND_MS = 2 * 60_000
 // How long a start, or a restart of signalk-internet, waits for an enabled signalk-internet's state before reporting none.
 export const FIRST_STATE_WAIT_MS = 60_000
 
+/** One of the states the backup server knows, or null for anything else: no value, a cleared state, or a value from a newer signalk-internet. */
 export function toUplinkState(value: unknown): UplinkState {
   return typeof value === 'string' && KNOWN_STATES.has(value) ? (value as UplinkState) : null
 }
@@ -52,6 +53,7 @@ export class UplinkReporter {
 
   constructor(private readonly opts: UplinkReporterOptions) {}
 
+  /** Subscribes to the state and reports it; calling it again first undoes the previous start. */
   start(): void {
     this.stop()
     this.startWait()
@@ -77,6 +79,7 @@ export class UplinkReporter {
     void this.report()
   }
 
+  /** Unsubscribes and forgets the last report, so the next start() reports to the server again. */
   stop(): void {
     for (const unsubscribe of this.unsubscribes.splice(0)) unsubscribe()
     if (this.resendTimer) clearInterval(this.resendTimer)
@@ -88,6 +91,7 @@ export class UplinkReporter {
     this.generation++
   }
 
+  /** Sends the current state unless the target already has it. One send runs at a time; a call during a send runs once after it. */
   async report(): Promise<void> {
     if (this.sending) {
       this.queued = true
@@ -107,7 +111,7 @@ export class UplinkReporter {
     }
   }
 
-  // 'waiting' while an enabled signalk-internet has not given a state since the start or its own restart.
+  /** The state to report, or 'waiting' while an enabled signalk-internet has not given one since start() or its own restart. */
   async currentState(): Promise<UplinkState | 'waiting'> {
     const state = toUplinkState(this.value)
     if (state !== null || !this.waiting()) return state
@@ -116,6 +120,7 @@ export class UplinkReporter {
     return toUplinkState(this.value) ?? (this.waiting() ? 'waiting' : null)
   }
 
+  /** Takes the state from a delta; a null (signalk-internet stopped) starts a new wait. */
   private onDelta(delta: Delta): void {
     for (const update of delta.updates) {
       if (!('values' in update)) continue
@@ -128,6 +133,7 @@ export class UplinkReporter {
     void this.report()
   }
 
+  /** Waits up to FIRST_STATE_WAIT_MS for a state, then reports what there is. */
   private startWait(): void {
     if (this.waitTimer) clearTimeout(this.waitTimer)
     this.waitTimer = setTimeout(() => {
@@ -136,10 +142,12 @@ export class UplinkReporter {
     }, FIRST_STATE_WAIT_MS)
   }
 
+  /** True for FIRST_STATE_WAIT_MS after start() and after each null; a state that arrives meanwhile is reported anyway. */
   private waiting(): boolean {
     return this.waitTimer !== null
   }
 
+  /** One report to the target; a send that stop() overtook does not record what it sent. */
   private async send(
     target: NonNullable<ReturnType<UplinkReporterOptions['target']>>
   ): Promise<void> {
@@ -160,6 +168,7 @@ export class UplinkReporter {
     }
   }
 
+  /** Whether signalk-internet is installed and enabled; false when the server cannot list its plugins. */
   private async publisherEnabled(): Promise<boolean> {
     if (!this.opts.getPluginsList) return false
     try {
