@@ -629,15 +629,12 @@ describe('automatic server update', () => {
   it('waits on a metered link and updates once it clears', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const { app, plugin, events } = await startAuto(true)
-    let link = 'metered'
-    app.getSelfPath.mockImplementation((p) =>
-      p === 'network.internet.state' ? { value: link } : undefined
-    )
+    app.subscriptionmanager.publish('metered')
 
     await vi.advanceTimersByTimeAsync(6 * 60 * 60_000)
     expect(events.filter((e) => e.startsWith('pull'))).toEqual([])
 
-    link = 'online'
+    app.subscriptionmanager.publish('online')
     // Step in minutes so the real requests behind each check can answer between timer jumps.
     const updated = () =>
       app.setPluginStatus.mock.calls.some((c) => c[0] === `Backup server updated to ${NEXT}`)
@@ -653,16 +650,19 @@ describe('automatic server update', () => {
     ])
   })
 
-  it('ignores a metered state left behind by a disabled signalk-internet', async () => {
+  it('updates once a disabled signalk-internet clears its metered state', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const { app, plugin, events } = await startAuto(true, 'newer-version', undefined, [
       { id: 'signalk-internet', enabled: false }
     ])
-    app.getSelfPath.mockImplementation((p) =>
-      p === 'network.internet.state' ? { value: 'metered' } : undefined
-    )
+    app.subscriptionmanager.publish('metered')
 
-    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    await vi.advanceTimersByTimeAsync(6 * 60 * 60_000)
+    expect(events.filter((e) => e.startsWith('pull'))).toEqual([])
+
+    // signalk-internet publishes null when it stops; disabled, no new state follows.
+    app.subscriptionmanager.publish(null)
+    await vi.advanceTimersByTimeAsync(15 * 60_000)
     await until(() => events.some((e) => e.startsWith('pull')))
     await plugin.stop()
 
