@@ -35,6 +35,7 @@ export interface UplinkReporterOptions {
 
 // Tells the backup server what signalk-internet says about the link, so its automatic cloud syncs wait while the link is metered or down.
 // The state comes from one subscription, from start() to stop(); the server sends the last value when it starts.
+// A published state is believed without asking the plugin list: signalk-internet publishes null when it is disabled. Releases up to 0.7.1 do not, and their last state stays until Signal K restarts.
 export class UplinkReporter {
   private resendTimer: NodeJS.Timeout | null = null
   // Set while a missing state is waited for: from start(), and again from the null signalk-internet publishes when it stops.
