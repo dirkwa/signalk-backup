@@ -39,7 +39,7 @@ export const ConfigSchema = Type.Object({
       'without asking: the plugin checks every 6 hours, downloads the new image (about 430MB) ' +
       'while the running server keeps working, and switches once no restore is running. If the ' +
       'new version does not start, it goes back to the previous one. While signalk-internet ' +
-      'reports a metered, captive or offline link, the check waits; "Apply update" in the ' +
+      'reports a metered, captive or offline link, the download waits; "Apply update" in the ' +
       'Backup app always runs.'
   }),
   externalUrl: Type.String({
