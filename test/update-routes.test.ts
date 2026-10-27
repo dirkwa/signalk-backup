@@ -72,6 +72,7 @@ function fakeSubscriptions() {
   }
 }
 
+/** The Signal K app for the update routes; its subscription manager replays the last published link state, as the server's does. */
 function makeApp(dataDir: string) {
   return {
     debug: vi.fn(),

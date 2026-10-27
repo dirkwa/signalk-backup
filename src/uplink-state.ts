@@ -133,7 +133,7 @@ export class UplinkReporter {
     void this.report()
   }
 
-  /** Waits up to FIRST_STATE_WAIT_MS for a state, then reports what there is. */
+  /** A null sent before signalk-internet's first probe would end the server's startup hold on syncs, or lift a metered hold while signalk-internet restarts; so nothing is sent until a state comes or the wait is over. */
   private startWait(): void {
     if (this.waitTimer) clearTimeout(this.waitTimer)
     this.waitTimer = setTimeout(() => {
