@@ -44,6 +44,35 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((d) => rm(d, { recursive: true, force: true })))
 })
 
+/** Signal K's subscription manager as the uplink reporter uses it: a subscription gets the last published value at once. */
+function fakeSubscriptions() {
+  let last: unknown
+  const listeners = new Set<(delta: unknown) => void>()
+  const delta = (value: unknown) => ({
+    updates: [{ values: [{ path: 'network.internet.state', value }] }]
+  })
+  return {
+    subscribe: vi.fn(
+      (
+        _subscription: unknown,
+        unsubscribes: Array<() => void>,
+        _onError: unknown,
+        onDelta: (delta: unknown) => void
+      ) => {
+        listeners.add(onDelta)
+        unsubscribes.push(() => listeners.delete(onDelta))
+        if (last !== undefined) onDelta(delta(last))
+      }
+    ),
+    unsubscribe: vi.fn(),
+    publish(value: unknown) {
+      last = value
+      for (const onDelta of listeners) onDelta(delta(value))
+    }
+  }
+}
+
+/** The Signal K app for the update routes; its subscription manager replays the last published link state, as the server's does. */
 function makeApp(dataDir: string) {
   return {
     debug: vi.fn(),
@@ -54,7 +83,7 @@ function makeApp(dataDir: string) {
       cb(null)
     }),
     getDataDirPath: () => dataDir,
-    getSelfPath: vi.fn<(path: string) => unknown>(() => undefined),
+    subscriptionmanager: fakeSubscriptions(),
     handleMessage: vi.fn()
   }
 }
@@ -370,7 +399,7 @@ describe('"Apply update" with a new address', () => {
       app.setPluginStatus.mock.calls.some((c) => String(c[0]).includes('Backup engine ready'))
     )
 
-    app.getSelfPath.mockReturnValue({ value: 'metered' })
+    app.subscriptionmanager.publish('metered')
     address = after
     const res = await request(server).post('/api/update/apply').send({ tag: BACKUP_SERVER_VERSION })
     await until(() => afterUplinks.length > 0)

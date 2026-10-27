@@ -73,6 +73,7 @@ function installFakeManager(address: string, state: () => string) {
   return manager
 }
 
+/** The Signal K app for the /status tests: options save at once, and no link state is ever delivered. */
 function makeApp(dataDir: string) {
   return {
     debug: vi.fn(),
@@ -83,7 +84,7 @@ function makeApp(dataDir: string) {
       cb(null)
     }),
     getDataDirPath: () => dataDir,
-    getSelfPath: () => undefined,
+    subscriptionmanager: { subscribe: vi.fn(), unsubscribe: vi.fn() },
     handleMessage: vi.fn()
   }
 }

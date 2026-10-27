@@ -24,6 +24,7 @@ function listen(handler: http.RequestListener): Promise<string> {
   })
 }
 
+/** The Signal K app the plugin starts against: options save at once, and the subscription manager never delivers, so no link state is known. */
 function makeApp(dataDir: string) {
   return {
     debug: vi.fn(),
@@ -34,7 +35,7 @@ function makeApp(dataDir: string) {
       cb(null)
     }),
     getDataDirPath: () => dataDir,
-    getSelfPath: () => undefined,
+    subscriptionmanager: { subscribe: vi.fn(), unsubscribe: vi.fn() },
     handleMessage: vi.fn(),
     setProviderStatus: vi.fn(),
     setProviderError: vi.fn()
