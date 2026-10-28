@@ -280,6 +280,25 @@ describe('UplinkReporter', () => {
       reporter.stop()
     })
 
+    it('takes a state published while the plugin list is being read', async () => {
+      const { app, publish } = serverWith(undefined)
+      let answer: (plugins: Array<{ id: string; enabled: boolean }>) => void = () => undefined
+      const reporter = new UplinkReporter({
+        app,
+        target: () => null,
+        getPluginsList: () =>
+          new Promise((resolve) => {
+            answer = resolve
+          })
+      })
+      reporter.start()
+      const state = reporter.currentState()
+      publish('metered')
+      answer([])
+      expect(await state).toBe('metered')
+      reporter.stop()
+    })
+
     it('sends no state at once when a disabled signalk-internet clears it', async () => {
       const { app, publish } = serverWith('metered')
       const reporter = new UplinkReporter({

@@ -63,6 +63,13 @@ const SERVER_UPDATE_INTERVAL_MS = 6 * 60 * 60_000
 const SERVER_UPDATE_BUSY_RETRY_MS = 15 * 60_000
 // How long a recreated server gets to answer /api/health before it is rolled back.
 const SERVER_UPDATE_READY_MS = 3 * 60_000
+// The same link states that hold the server's automatic cloud syncs, plus the start's wait for the first one.
+const SERVER_UPDATE_HOLDING_LINKS: ReadonlySet<string> = new Set([
+  'metered',
+  'captive',
+  'offline',
+  'waiting'
+])
 
 /**
  * Sensible default resource limits for the backup-server container.
@@ -661,10 +668,18 @@ export default function (app: BackupServerAPI): Plugin {
       if (!wanted()) return SERVER_UPDATE_INTERVAL_MS
       const check = await container.checkForUpdate()
       const current = resolvedAutoTag
-      // An offline result is the cached one, and its download would fail.
-      if (!current || !check || check.reason === 'offline') return SERVER_UPDATE_INTERVAL_MS
+      if (!current || !check) return SERVER_UPDATE_INTERVAL_MS
+      // An offline result is the cached one, and its download would fail; look again soon, as for a held link.
+      if (check.reason === 'offline') return SERVER_UPDATE_BUSY_RETRY_MS
       target = pickServerUpdate(current, check.latestVersion, failedServerVersions)
       if (!target || !wanted()) return SERVER_UPDATE_INTERVAL_MS
+      // Read right before the pull: the link can turn metered while the check is out.
+      const link = await uplinkReporter.currentState()
+      if (link && SERVER_UPDATE_HOLDING_LINKS.has(link)) {
+        app.debug(`Backup server ${target} waits while the internet link is ${link}`)
+        return SERVER_UPDATE_BUSY_RETRY_MS
+      }
+      if (!wanted()) return SERVER_UPDATE_INTERVAL_MS
       await pullServerImage(target)
     } catch (err) {
       app.debug(`Backup server update check failed: ${errMsg(err)}`)
